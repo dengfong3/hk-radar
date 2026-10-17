@@ -5,7 +5,20 @@
 > ⚠️ 这不是投资顾问产品：**不内置任何买卖建议**。减仓档、止损线、亏损预算都要**使用者自己填**。
 > 页面首屏有免责声明：仅供个人行情记录与纪律提醒，不构成投资建议，盈亏自负。
 
+**线上地址（已部署并验证）**：https://dengfong3.github.io/hk-radar/
+
+| 部署项 | 状态 |
+|:--|:--|
+| 仓库 | github.com/dengfong3/hk-radar（public） |
+| Pages | main / (root)，https 自动 |
+| 线上文件 SHA256 | 与本地测试版**字节一致** |
+| manifest.json | 200 pplication/json |
+| sw.js | 200 pplication/javascript |
+| 图标 192/512 | 200 image/png |
+
 ![手机端实际渲染（390×844，headless 真测）](preview-mobile.png)
+
+![线上部署实测（2026-10-17，现价 84.15）](preview-live.png)
 
 ---
 
