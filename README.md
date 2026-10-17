@@ -36,7 +36,7 @@ hk-radar-pwa/
   icon-192.png / icon-512.png   # 图标
   make_icons.py           # 重新生成图标的脚本（可选）
   preview-mobile.png      # 手机端渲染截图（390 宽）
-  test/pwa.mjs            # 自动化验证（100 项断言）
+  test/pwa.mjs            # 自动化验证（104 项断言）
   README.md               # 本文件
 ```
 
@@ -151,6 +151,20 @@ hk-radar-pwa/
 腾讯快照 qt.gtimg.cn 是 **GBK** 编码，而 
 esponse.text() 固定按 UTF-8 解 → 中文名会变 �。
 现在快照改用 rrayBuffer() + TextDecoder(gbk)，并且名字出现替换字符时直接不显示。
+
+## 三点五五、怎么确认家人用的是最新版
+
+页面**最底部**有两样东西（截图见 preview-version.png）：
+
+| 元素 | 作用 |
+|:--|:--|
+| 版本 v0.6 · 2026-10-17 | 每次发版更新；家人报问题时先看这个 |
+| ⟳ 强制更新 按钮 | 一键清 Service Worker 缓存 + 重载，立刻拉最新版 |
+
+**更新机制（为什么链接方式会自动最新）**：
+- GitHub Pages 的 Cache-Control: max-age=600 → 浏览器最多缓存 10 分钟
+- Service Worker 对页面导航是**网络优先**：联网时永远先拉最新，只有断网才用缓存兜底
+- 所以：**发链接** → 家人刷新/重开就是最新；**发文件/压缩包** → 永远是那一份旧快照
 
 ## 三点六、三源兜底与限流自保（v0.5）
 
@@ -298,7 +312,7 @@ git add -A; git commit -m "update"; git push
 
 ```powershell
 cd E:\12-1-good\hk-radar-pwa
-node test/pwa.mjs        # 100 项：静态合规检查 + 假 DOM 两个场景 + 计划编辑器 + 日内参考位 + 备用源
+node test/pwa.mjs        # 104 项：静态合规检查 + 假 DOM 两个场景 + 计划编辑器 + 日内参考位 + 备用源
 ```
 
 测试会检查：
