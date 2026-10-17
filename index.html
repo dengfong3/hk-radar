@@ -60,8 +60,8 @@ body{padding:10px 10px calc(20px + var(--safe-b));max-width:560px;margin:0 auto;
 .cell span{font-size:14px;font-weight:600}
 canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px solid var(--line2);border-radius:8px;margin-top:6px}
 .tabs{display:flex;gap:6px;margin-top:7px}
-.tabs button{flex:1 1 0;min-height:34px;border:1px solid var(--line);background:var(--card2);color:#a9b6c9;
-  border-radius:8px;font-size:13px}
+.tabs button{flex:1 1 0;min-height:36px;border:1px solid var(--line);background:var(--card2);color:#a9b6c9;
+  border-radius:8px;font-size:12px;padding:0 2px}
 .tabs button.on{background:#0f2740;border-color:var(--accent);color:#bae6fd}
 .ladder{display:flex;flex-direction:column;gap:2px}
 .lrow{display:flex;align-items:center;gap:6px;padding:6px 7px;border-radius:7px;font-size:13px}
@@ -202,7 +202,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <canvas id="chart" aria-label="分时图"></canvas>
   <div class="tabs">
     <button id="tabMin" class="on">分时</button>
-    <button id="tabM5">5 分 K</button>
+    <button id="tabM5">5分</button>
+    <button id="tabM15">15分</button>
+    <button id="tabM30">30分</button>
+    <button id="tabM60">60分</button>
   </div>
 </div>
 
@@ -1111,6 +1114,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   st.plans = st.plans || {};
   st.sound = st.sound !== false;
   st.chartMode = st.chartMode || "min";
+  if (st.chartMode === "m5") st.chartMode = "5";   // 兼容旧版本存的值
   st.lastFired = st.lastFired || {};
   st.eventRisk = st.eventRisk || false;
   if (st.watch.indexOf(st.code) < 0) st.watch.unshift(st.code);
@@ -1289,7 +1293,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     g.font = "10px sans-serif";
     var cost = curPos().cost || 0, plan = curPlan();
     var levels = plan ? (plan.levels || []) : [];
-    if (st.chartMode === "m5") draw5m(g, w, h, cost, levels); else drawMin(g, w, h, cost, levels, metrics);
+    if (st.chartMode === "min") drawMin(g, w, h, cost, levels, metrics);
+    else drawBars(g, w, h, cost, levels, C.buildBars(allPointsNow(), parseInt(st.chartMode, 10) || 5), st.chartMode);
   }
   function drawMin(g, w, h, cost, levels, m) {
     var pts = (parsed.points || []).filter(function (p) { return p.price != null; });
@@ -1346,10 +1351,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var m = C.marketOf(st.code);
     return m === "cn" ? 240 : m === "us" ? 390 : 330;
   }
-  function draw5m(g, w, h, cost, levels) {
-    var bars = C.aggregate5m((parsed.points || []).filter(function (p) { return p.price != null; }));
-    if (!bars.length) { g.fillStyle = "#475569"; g.fillText("暂无数据", 8, h / 2); return; }
-    var show = bars.slice(-36);
+  function drawBars(g, w, h, cost, levels, bars, label) {
+    if (!bars || !bars.length) { g.fillStyle = "#475569"; g.fillText("暂无数据", 8, h / 2); return; }
+    var show = bars.slice(-60);
     var pad = { l: 4, r: 40, t: 8, b: 4 };
     var volH = Math.round((h - pad.t - pad.b) * 0.22), priceH = (h - pad.t - pad.b) - volH - 4;
     var vals = [];
@@ -1391,7 +1395,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     });
     g.fillStyle = "#7c8aa0";
     var lb = show[show.length - 1];
-    g.fillText("5分K 最近" + show.length + "根", pad.l + 2, pad.t + 8);
+    g.fillText(label + "分K 最近" + show.length + "根", pad.l + 2, pad.t + 8);
   }
 
   /* ---------- 渲染 ---------- */
@@ -1633,6 +1637,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
   /* 3 天历史（多周期 K 线与 3 日背景用；慢速拉取，失败降级为仅今日） */
   var historyPoints = null, historyAt = 0, historyCode = "", mpData = null, ctx3Data = null;
+  function allPointsNow() {
+    return mergePoints(historyPoints, parsed ? parsed.points : []);
+  }
   function mergePoints(history, today) {
     if (!history || !history.length) return today || [];
     var todayDate = today && today.length ? (today[0].date || "") : "";
@@ -1781,14 +1788,18 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   });
   $("btnSwitch").addEventListener("click", function () { switchTo($("codeInput").value); });
   $("codeInput").addEventListener("keydown", function (e) { if (e && e.key === "Enter") switchTo($("codeInput").value); });
-  $("tabMin").addEventListener("click", function () {
-    st.chartMode = "min"; save({ chartMode: "min" });
-    $("tabMin").className = "on"; $("tabM5").className = ""; chart();
-  });
-  $("tabM5").addEventListener("click", function () {
-    st.chartMode = "m5"; save({ chartMode: "m5" });
-    $("tabM5").className = "on"; $("tabMin").className = ""; chart();
-  });
+  function setChartMode(mode) {
+    st.chartMode = mode; save({ chartMode: mode });
+    [["tabMin", "min"], ["tabM5", "5"], ["tabM15", "15"], ["tabM30", "30"], ["tabM60", "60"]].forEach(function (pair) {
+      $(pair[0]).className = st.chartMode === pair[1] ? "on" : "";
+    });
+    chart();
+  }
+  $("tabMin").addEventListener("click", function () { setChartMode("min"); });
+  $("tabM5").addEventListener("click", function () { setChartMode("5"); });
+  $("tabM15").addEventListener("click", function () { setChartMode("15"); });
+  $("tabM30").addEventListener("click", function () { setChartMode("30"); });
+  $("tabM60").addEventListener("click", function () { setChartMode("60"); });
   ["inShares", "inCost", "inRealized"].forEach(function (id) {
     $(id).addEventListener("change", function () { readPos(); if (metrics) render(metrics, parsed ? parsed.points : []); });
   });
@@ -1876,7 +1887,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   $("btnSound").textContent = st.sound ? "🔔" : "🔕";
   $("btnEvent").className = "tb" + (st.eventRisk ? " danger" : "");
   $("btnEvent").textContent = st.eventRisk ? "⛔" : "⚠";
-  if (st.chartMode === "m5") { $("tabM5").className = "on"; $("tabMin").className = ""; }
+  (function () {
+    var map = { min: "tabMin", "5": "tabM5", "15": "tabM15", "30": "tabM30", "60": "tabM60" };
+    Object.keys(map).forEach(function (k) { $(map[k]).className = st.chartMode === k ? "on" : ""; });
+  })();
   $("codeInput").value = C.displayCode(st.code);
   renderChips(); renderPlanSummary(); bindPosInputs();
   tick(false);
