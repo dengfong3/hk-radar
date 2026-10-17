@@ -1,0 +1,11 @@
+# 系统垃圾
+Thumbs.db
+.DS_Store
+desktop.ini
+# 临时调试文件
+_probe*
+_frame*
+*.log
+# 注意：不要把你自己导出的计划 JSON / 持仓截图提交上来（公开仓库）
+plan-*.json
+持仓*.png
