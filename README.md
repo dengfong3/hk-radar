@@ -12,8 +12,8 @@
 | 仓库 | github.com/dengfong3/hk-radar（public） |
 | Pages | main / (root)，https 自动 |
 | 线上文件 SHA256 | 与本地测试版**字节一致** |
-| manifest.json | 200 pplication/json |
-| sw.js | 200 pplication/javascript |
+| manifest.json | 200 application/json |
+| sw.js | 200 application/javascript |
 | 图标 192/512 | 200 image/png |
 
 ![手机端实际渲染（390×844，headless 真测）](preview-mobile.png)
