@@ -127,7 +127,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 .planbox{font-size:12px;color:#9fb0c7;line-height:1.7}
 .planbox b{color:var(--txt)}
 .empty{font-size:12px;color:var(--dim);line-height:1.6}
-.foot{font-size:10px;color:var(--dim2);line-height:1.6;margin-top:6px}
+.foot{font-size:10px;color:var(--dim2);line-height:1.6;margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.foot #btnForce{font-size:10px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--card2);color:#a9b6c9;min-height:26px}
+.foot #btnForce:active{background:#1f3a5f}
 .hint{font-size:11px;color:#fbbf24;background:#241d0d;border:1px dashed #78560f;border-radius:8px;padding:7px 9px;margin-bottom:8px}
 /* 弹窗提醒 */
 .alert{position:fixed;left:8px;right:8px;top:calc(8px + env(safe-area-inset-top,0px));z-index:99;
@@ -262,7 +264,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   交易计划由使用者自行设定，盈亏自负。投资有风险，入市需谨慎。
 </div>
 
-<div class="foot" id="foot">数据：腾讯行情公开接口 · 本机保存，不上传任何数据</div>
+<div class="foot">
+  <span id="footVer">版本 —</span>
+  <button id="btnForce" title="清除缓存并重新加载最新版本">⟳ 强制更新</button>
+  <div>数据：腾讯行情公开接口 · 本机保存，不上传任何数据</div>
+</div>
 
 <!-- 提醒弹窗 -->
 <div class="alert" id="alertBox">
@@ -1145,6 +1151,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
+  var APP_VERSION = "v0.6 · 2026-10-17";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -1978,6 +1985,25 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var map = { min: "tabMin", "5": "tabM5", "15": "tabM15", "30": "tabM30", "60": "tabM60" };
     Object.keys(map).forEach(function (k) { $(map[k]).className = st.chartMode === k ? "on" : ""; });
   })();
+  $("footVer").textContent = "版本 " + APP_VERSION;
+  $("btnForce").addEventListener("click", function () {
+    $("btnForce").textContent = "更新中…";
+    try {
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (rs) {
+          rs.forEach(function (r) { r.unregister(); });
+        }).catch(function () {});
+      }
+    } catch (e) {}
+    try {
+      if (window.caches && caches.keys) {
+        caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); }).catch(function () {});
+      }
+    } catch (e) {}
+    setTimeout(function () {
+      location.replace(location.pathname + "?t=" + Date.now());
+    }, 400);
+  });
   $("codeInput").value = C.displayCode(st.code);
   renderChips(); renderPlanSummary(); bindPosInputs();
   tick(false);

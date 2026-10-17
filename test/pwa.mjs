@@ -347,5 +347,13 @@ ok("快照场景：回本价仍可算（需成本）", h3.txt("posInfo").include
 ok("快照场景：多周期显示数据不足而非报错", h3.deep("mp").includes("周期数据不足") || h3.deep("mp").includes("快照"), h3.deep("mp").slice(0, 120));
 ok("快照场景：日内参考位给出无分时降级提示", h3.deep("refs").includes("无分时数据"), h3.deep("refs").slice(0, 120));
 
+
+/* ---------- 9) 版本号与强制更新（家人自查是否最新） ---------- */
+console.log("\n[版本号与强制更新]");
+ok("页面包含版本号常量", /APP_VERSION\s*=\s*"v[\d.]+/.test(html), (html.match(/APP_VERSION\s*=\s*"[^"]*"/) || [])[0]);
+ok("页脚有强制更新按钮", html.includes('id="btnForce"') && html.includes("强制更新"));
+ok("页脚显示版本（场景一）", /版本\s*v\d/.test(h1.txt("footVer")), h1.txt("footVer"));
+ok("强制更新按钮已注册点击", (h1.byId("btnForce").listeners.click || []).length > 0);
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
