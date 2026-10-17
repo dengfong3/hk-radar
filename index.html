@@ -223,6 +223,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
 <div class="card">
   <div class="card-title"><b>多周期节奏</b><span class="sp"></span><span id="mpBias" style="font-size:10px"></span></div>
+  <div class="hint" id="snapHint" style="display:none"></div>
   <div class="mp" id="mp"></div>
 </div>
 
@@ -678,6 +679,42 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     return bars;
   }
 
+    /**
+     * 腾讯快照解析（第三兜底）：只给报价，没有分时。
+     * 输入形如：v_hk06166="100~剑桥科技~06166~84.150~81.600~...";
+     */
+    function parseTencentSnapshot(text, code) {
+      const m = /="([^"]*)"/.exec(String(text || ""));
+      if (!m) return null;
+      const q = m[1].split("~");
+      const price = num(q[3]);
+      if (price == null || !(price > 0)) return null;
+      const prevClose = num(q[4]);
+      const rawTurn = num(q[37]);
+      return {
+        ok: true,
+        source: "tencent-snapshot",
+        date: "",
+        points: [],
+        quote: {
+          name: q[1] || "", code: q[2] || code,
+          price, prevClose, open: num(q[5]), volume: num(q[6]),
+          time: fmtQuoteTime(q[30]),
+          change: num(q[31]) != null ? num(q[31]) : (prevClose != null ? price - prevClose : null),
+          changePct: num(q[32]) != null ? num(q[32]) : (prevClose ? (price - prevClose) / prevClose * 100 : null),
+          high: num(q[33]), low: num(q[34]),
+          turnover: rawTurn == null || rawTurn === 0 ? null : (marketOf(code) === "cn" ? rawTurn * 10000 : rawTurn),
+          pe: num(q[39]), amplitude: num(q[43]), high52: num(q[48]), low52: num(q[49]), lotSize: num(q[59])
+        }
+      };
+    }
+
+    /** 失败退避：60s → 120s → 240s → 300s（上限），避免继续激怒限流 */
+    function backoffDelay(failStreak) {
+      const n = Math.max(1, failStreak || 1);
+      return Math.min(60000 * Math.pow(2, n - 1), 300000);
+    }
+
   /* 每手股数：A 股 100 / 美股 1 / 港股 50 股档 */
   function lotOf(code) {
     var m = marketOf(code);
@@ -736,6 +773,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var price = m && m.price;
     if (price === null || !(price > 0)) return refs;
     refs.ok = true;
+    refs.degraded = !(points && points.length);
+    if (refs.degraded) refs.notes.push("无分时数据（快照模式）：只用日高/日低/枢轴/关口，精度下降，均价与量能不可用");
     var shares = pos && pos.shares > 0 ? pos.shares : 0;
     var cost = pos && pos.cost > 0 ? pos.cost : 0;
     var H = m.high, L = m.low, O = m.open, PC = m.prevClose, VW = m.vwap, lot = lotOf(code);
@@ -1081,6 +1120,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     evaluateSignals: evaluateSignals, buildLadder: buildLadder, marketPhase: marketPhase,
     lotOf: lotOf, eastmoneySecid: eastmoneySecid, parseEastmoney: parseEastmoney, intradayRefs: intradayRefs,
     buildBars: buildBars, ema: ema, periodStats: periodStats, multiPeriod: multiPeriod,
+    parseTencentSnapshot: parseTencentSnapshot, backoffDelay: backoffDelay,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
     phaseText: phaseText, pollDelay: pollDelay, aggregate5m: aggregate5m, shouldAlert: shouldAlert
   };
@@ -1420,7 +1460,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     chg.textContent = (m.change != null ? (m.change >= 0 ? "+" : "") + m.change.toFixed(2) : "--") + "  " + fmtPct(m.changePct);
     chg.className = "chg " + (up ? "up" : dn ? "down" : "");
     var age = lastOk ? Math.round((Date.now() - lastOk) / 1000) : null;
-    $("qtime").textContent = (m.time || "--") + (age != null && age >= 20 ? " · " + age + "s前" : "") + (lastSource === "东财" ? " · 东财" : "");
+    $("qtime").textContent = (m.time || "--") + (age != null && age >= 20 ? " · " + age + "s前" : "") + (lastSource && lastSource !== "腾讯" ? " · " + lastSource : "");
     $("qtime").style.color = age != null && age >= 45 ? "#fca5a5" : "";
 
     var cells = [["当日均价", fmtP(m.vwap)], ["偏离均价", m.vwapDevPct == null ? "--" : fmtPct(m.vwapDevPct)],
@@ -1479,6 +1519,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       noPlan.style.display = "";
       noPlan.textContent = "该代码未设交易计划：填「股数+成本」后只显示回本价与资金止损；点下方「编辑」可设你自己的减仓档/止损线。";
     } else noPlan.style.display = "none";
+
+    // 快照模式：只有报价，没有分时
+    var snapHint = $("snapHint");
+    if (!points || !points.length) {
+      snapHint.style.display = "";
+      snapHint.textContent = "⚠ 快照模式（分时源被限流）：只有报价；均价/量能/K线/日内参考位暂不可用，点 ⟳ 重试";
+    } else snapHint.style.display = "none";
 
     // 多周期节奏：5/15/30/60 分钟 + 3 日背景 + 时机
     (function () {
@@ -1637,6 +1684,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
   /* 3 天历史（多周期 K 线与 3 日背景用；慢速拉取，失败降级为仅今日） */
   var historyPoints = null, historyAt = 0, historyCode = "", mpData = null, ctx3Data = null;
+  var failStreak = 0;
   function allPointsNow() {
     return mergePoints(historyPoints, parsed ? parsed.points : []);
   }
@@ -1663,27 +1711,50 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
   /* 行情抓取：主源腾讯分钟线 → 失败自动切东方财富（不同厂商，独立可用性） */
   var lastSource = "腾讯";
+  var srcSkip = { minute: 0, eastmoney: 0 };
+  var SRC_COOLDOWN_MS = 5 * 60 * 1000;
   function fetchQuote(code) {
-    return fetch("https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=" + encodeURIComponent(code), { cache: "no-store" })
-      .then(function (r) { if (!r.ok) throw new Error("主源 HTTP " + r.status); return r.json(); })
-      .then(function (json) {
-        var p = C.parsePayload(json, code);
-        if (!p.ok || !p.points || !p.points.length) throw new Error(p.error || "主源无分时");
-        return p;
-      })
-      .catch(function () {
-        var secid = C.eastmoneySecid(code);
-        if (!secid) throw new Error("主源不可用，且该代码（美股）没有备用源");
-        return fetch("https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=" + secid +
+    var now = Date.now();
+    var p1 = Promise.resolve(null);
+    if (now > srcSkip.minute) {
+      p1 = fetch("https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=" + encodeURIComponent(code), { cache: "no-store" })
+        .then(function (r) { if (!r.ok) throw new Error("主源 HTTP " + r.status); return r.json(); })
+        .then(function (json) {
+          var p = C.parsePayload(json, code);
+          if (!p.ok || !p.points || !p.points.length) throw new Error(p.error || "主源无分时");
+          return p;
+        })
+        .catch(function () { srcSkip.minute = Date.now() + SRC_COOLDOWN_MS; return null; });
+    }
+    return p1.then(function (p) {
+      if (p) return p;
+      var secid = C.eastmoneySecid(code);
+      var p2 = Promise.resolve(null);
+      if (secid && Date.now() > srcSkip.eastmoney) {
+        p2 = fetch("https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=" + secid +
           "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58&iscr=0&ndays=1",
           { cache: "no-store" })
-          .then(function (r) { if (!r.ok) throw new Error("两个行情源都不可用（备用源 HTTP " + r.status + "）"); return r.json(); })
-          .then(function (json2) {
-            var p2 = C.parseEastmoney(json2, code);
-            if (!p2.ok) throw new Error(p2.error || "备用源无数据");
-            return p2;
-          });
+          .then(function (r) { if (!r.ok) throw new Error("备用源 HTTP " + r.status); return r.json(); })
+          .then(function (json) {
+            var p = C.parseEastmoney(json, code);
+            if (!p || !p.ok) throw new Error("备用源无数据");
+            return p;
+          })
+          .catch(function () { srcSkip.eastmoney = Date.now() + SRC_COOLDOWN_MS; return null; });
+      }
+      return p2.then(function (p2r) {
+        if (p2r) return p2r;
+        // 3) 腾讯快照（只有报价）
+        return fetch("https://qt.gtimg.cn/q=" + encodeURIComponent(code), { cache: "no-store" })
+          .then(function (r) { if (!r.ok) throw new Error("快照源 HTTP " + r.status); return r.text(); })
+          .then(function (txt) {
+            var p3 = C.parseTencentSnapshot(txt, code);
+            if (!p3) throw new Error("快照解析失败");
+            return p3;
+          })
+          .catch(function () { throw new Error("所有行情源暂不可用（可能被限流）"); });
       });
+    });
   }
 
   /* ---------- 轮询 ---------- */
@@ -1695,7 +1766,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       .then(function (p) {
         if (requested !== st.code) return;
         parsed = p; metrics = C.computeMetrics(p, null, requested); lastOk = Date.now();
-        lastSource = p.source === "eastmoney" ? "东财" : "腾讯";
+        lastSource = p.source === "eastmoney" ? "东财" : (p.source === "tencent-snapshot" ? "快照" : "腾讯");
+        failStreak = 0;
         var allPts = mergePoints(historyPoints, p.points);
         mpData = C.multiPeriod(allPts);
         ctx3Data = C.threeDayContext(allPts, 3);
@@ -1713,12 +1785,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       })
       .catch(function (e) {
         if (requested !== st.code) return;
+        failStreak++;
         if (!metrics) {
           $("px").textContent = "读取失败"; $("px").className = "px flat";
           $("chg").textContent = (e && e.message) || "网络错误"; $("chg").className = "chg";
           $("signals").textContent = "";
           var d = document.createElement("div"); d.className = "srow danger";
-          d.textContent = "行情接口不可用：检查代码是否正确 / 网络，或稍后点 ⟳";
+          d.textContent = "行情源暂不可用（可能被限流）：已自动退避 " + Math.round(C.backoffDelay(failStreak) / 1000) + " 秒，点 ⟳ 立即重试";
           $("signals").appendChild(d);
         }
       })
@@ -1734,7 +1807,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           extra.push(Math.max(bs, fl));
         }
         var levels = plan ? (plan.levels || []) : [];
-        timer = setTimeout(function () { tick(false); }, manual ? 1500 : C.pollDelay(metrics, new Date(), extra, levels, st.code));
+        var delay = manual ? 1500 : C.pollDelay(metrics, new Date(), extra, levels, st.code);
+        if (failStreak > 0) delay = Math.max(delay, C.backoffDelay(failStreak));
+        timer = setTimeout(function () { tick(false); }, delay);
       });
   }
 

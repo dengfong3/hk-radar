@@ -81,7 +81,7 @@ function makeEmPayload() {
   return { rc: 0, data: { code: "603083", name: "剑桥科技", preClose: 158.0, trends } };
 }
 
-function makeHarness(seedStore, payloadFor) {
+function makeHarness(seedStore, payloadFor, opts) {
   const ids = new Map();
   const byId = (id) => { if (!ids.has(id)) ids.set(id, new El("div")); return ids.get(id); };
   const doc = {
@@ -95,6 +95,11 @@ function makeHarness(seedStore, payloadFor) {
   const ls = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
   const fetchShim = async (url) => {
     const u = String(url);
+    const o = opts || {};
+    if (o.snapshotOnly) {
+      if (u.indexOf("qt.gtimg.cn") >= 0) return { ok: true, text: async () => o.snapshotText };
+      return { ok: false, status: 501, json: async () => ({}), text: async () => "" };
+    }
     if (u.indexOf("trends2") >= 0) return { ok: true, json: async () => makeEmPayload() };
     const code = decodeURIComponent(u.split("code=")[1] || "");
     const payload = payloadFor(code);
@@ -290,6 +295,47 @@ ok("渲染：显示 3 日背景", mpText.includes("近3日"), mpText.slice(-200)
 ok("渲染：显示时机建议", /回踩|减仓|区间|共振|分歧/.test(mpText), mpText.slice(-200));
 // 短周期数据不足时也要能优雅降级
 ok("数据不足时不抛异常", (() => { try { C.shortTermPlan({ price: 10, vwap: 10, vwapDevPct: 0 }, [], { shares: 0, cost: 0 }, { code: "hk06166" }); return true; } catch (e) { return false; } })());
+
+
+/* ---------- 7) 第三兜底：腾讯快照 + 退避 ---------- */
+console.log("\n[第三兜底与退避]");
+ok("核心导出快照解析与退避", !!(C.parseTencentSnapshot && C.backoffDelay));
+const sq = new Array(60).fill("0");
+sq[1] = "剑桥科技"; sq[2] = "06166"; sq[3] = "84.150"; sq[4] = "81.600"; sq[5] = "85.850"; sq[6] = "9825285.0";
+sq[30] = "2026/10/16 16:08:22"; sq[31] = "2.550"; sq[32] = "3.13"; sq[33] = "87.650"; sq[34] = "82.750";
+sq[37] = "837019141.750"; sq[39] = "111.55"; sq[43] = "6.00"; sq[48] = "172.900"; sq[49] = "60.500"; sq[59] = "50";
+const snap = C.parseTencentSnapshot('v_hk06166="' + sq.join("~") + '";', "hk06166");
+ok("快照：解析出报价", snap && snap.ok && snap.quote.price === 84.15 && snap.quote.time === "16:08:22", snap && snap.quote);
+ok("快照：没有分时点", snap && snap.points.length === 0);
+ok("快照：无效文本 → null", C.parseTencentSnapshot("<html>", "hk06166") === null);
+ok("退避：1/2/3/10 → 60/120/240/300 秒",
+  C.backoffDelay(1) === 60000 && C.backoffDelay(2) === 120000 && C.backoffDelay(3) === 240000 && C.backoffDelay(10) === 300000,
+  [C.backoffDelay(1), C.backoffDelay(2), C.backoffDelay(3), C.backoffDelay(10)]);
+ok("页面包含快照模式提示与三源兜底", html.includes("快照模式") && html.includes("qt.gtimg.cn"));
+
+
+/* ---------- 8) 最坏情况：分钟线 501 + 东财拒绝 → 快照兜底仍能报价 ---------- */
+console.log("\n[三源全挂时的快照兜底]");
+const sq2 = new Array(60).fill("0");
+sq2[1] = "剑桥科技"; sq2[2] = "06166"; sq2[3] = "84.150"; sq2[4] = "81.600"; sq2[5] = "85.850"; sq2[6] = "9825285.0";
+sq2[30] = "2026/10/16 16:08:22"; sq2[31] = "2.550"; sq2[32] = "3.13"; sq2[33] = "87.650"; sq2[34] = "82.750";
+sq2[37] = "837019141.750"; sq2[39] = "111.55"; sq2[43] = "6.00"; sq2[48] = "172.900"; sq2[49] = "60.500"; sq2[59] = "50";
+const h3 = makeHarness(
+  { code: "hk06166", watch: ["hk06166"], sound: false, chartMode: "min",
+    pos: { hk06166: { shares: 200, cost: 96.7, realized: 0 } }, plans: {}, trade: {}, lastFired: {} },
+  () => null,
+  { snapshotOnly: true, snapshotText: 'v_hk06166="' + sq2.join("~") + '";' });
+let threw3 = null;
+try { h3.run(coreSrc); h3.run(uiSrc); } catch (e) { threw3 = e; }
+ok("快照场景：脚本执行无异常", !threw3, threw3 && threw3.message);
+await new Promise((r) => setTimeout(r, 350));
+ok("快照场景：仍能显示现价 84.15", h3.txt("px") === "84.15", h3.txt("px"));
+ok("快照场景：显示涨跌幅 +3.13%", h3.txt("chg").includes("+3.13"), h3.txt("chg"));
+ok("快照场景：提示『快照模式』", h3.txt("snapHint").includes("快照模式"), h3.txt("snapHint"));
+ok("快照场景：数据时间标『快照』", h3.txt("qtime").includes("快照"), h3.txt("qtime"));
+ok("快照场景：回本价仍可算（需成本）", h3.txt("posInfo").includes("回本价 96.70"), h3.txt("posInfo"));
+ok("快照场景：多周期显示数据不足而非报错", h3.deep("mp").includes("周期数据不足") || h3.deep("mp").includes("快照"), h3.deep("mp").slice(0, 120));
+ok("快照场景：日内参考位给出无分时降级提示", h3.deep("refs").includes("无分时数据"), h3.deep("refs").slice(0, 120));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
