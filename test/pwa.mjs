@@ -200,5 +200,44 @@ ok("仓位上限 200 / 预算 5850 / 地板 67.45", p2 && p2.maxShares === 200 &
 ok("levels 供轮询加速使用（78 / 60.5）", p2 && p2.levels.indexOf(78) >= 0 && p2.levels.indexOf(60.5) >= 0, p2 && p2.levels);
 ok("保存后计划摘要已更新", h2.txt("planSummary").includes("减仓 92–97"), h2.txt("planSummary"));
 
+/* ---------- 5) 日内参考位 + 备用数据源 ---------- */
+console.log("\n[日内参考位（机械计算）与备用源]");
+const C = h1.win.RADAR_CORE;
+ok("页面包含『日内参考位』卡片", html.includes("日内参考位") && html.includes('id="refs"'));
+ok("卡片标注『机械位，非建议』", html.includes("机械位，非建议"));
+ok("核心导出 parseEastmoney / intradayRefs", !!(C.parseEastmoney && C.intradayRefs && C.lotOf && C.eastmoneySecid));
+ok("secid 映射：港股/沪/深/北/美股",
+  C.eastmoneySecid("hk06166") === "116.06166" && C.eastmoneySecid("sh603083") === "1.603083" &&
+  C.eastmoneySecid("sz000001") === "0.000001" && C.eastmoneySecid("bj835185") === "0.835185" &&
+  C.eastmoneySecid("usAAPL") === null);
+ok("每手股数：港股 50 / A股 100", C.lotOf("hk06166") === 50 && C.lotOf("sh603083") === 100);
+
+// 东财报文（真实格式裁剪：时间,开,收,高,低,分钟量,分钟额,均价）
+const EM = { data: { code: "603083", name: "剑桥科技", preClose: 167.2, trends: [
+  "2026-10-16 09:30,174.00,174.00,174.00,174.00,2704,47049600.00,174.000",
+  "2026-10-16 09:31,174.00,173.60,174.00,173.50,3000,52080000.00,173.890",
+  "2026-10-16 15:00,168.88,168.51,168.88,168.51,8632,145460697.00,169.906"
+] } };
+const em = C.parseEastmoney(EM, "sh603083");
+ok("备用源解析成功", em.ok === true && em.source === "eastmoney");
+ok("备用源：3 个分时点 / 量累加", em.points.length === 3 && em.points[1].cumVol === 570400, em.points[1].cumVol);
+ok("备用源：涨跌幅由昨收算出", Math.abs(em.quote.changePct - (168.51 - 167.2) / 167.2 * 100) < 1e-6, em.quote.changePct);
+ok("备用源：日内高低从分时推出", em.quote.high === 174 && em.quote.low === 168.51, [em.quote.high, em.quote.low]);
+ok("备用源：空 trends → ok=false", C.parseEastmoney({ data: { trends: [] } }, "sh603083").ok === false);
+
+// 用线上渲染出来的 refs 断言（场景一：A股 603083 + 100 股 @175）
+const refsText = h1.deep("refs");
+ok("A股场景：参考位卡片有内容", refsText.length > 20, refsText.slice(0, 80));
+ok("A股场景：显示减仓参考段", refsText.includes("减仓参考"), refsText.slice(0, 120));
+ok("A股场景：显示现价分隔", refsText.includes("现价 168.51"), refsText.slice(0, 160));
+ok("A股场景：标注 T+1", h1.txt("refsBias").includes("T+1"), h1.txt("refsBias"));
+ok("A股场景：有依据文字（前高/均价/枢轴/关口）",
+  /前高|均价|枢轴|整数关口|昨收|开盘|成本/.test(refsText), refsText.slice(0, 160));
+ok("A股场景：声明非预测", refsText.includes("非预测") && refsText.includes("不构成投资建议"), refsText.slice(-120));
+ok("A股场景：加仓参考被过滤到风控线 160 之上",
+  C.intradayRefs({ price: 168.51, high: 174, low: 166.58, open: 174, prevClose: 167.2, vwap: 169.9, vwapDevPct: -0.8, volRatio: 1 }, [], { shares: 100, cost: 175 }, { code: "sh603083", plan: PLAN }).add.every((x) => x.price > 160));
+// 全新安装场景：无持仓 → 减仓一侧应为「观察」
+ok("空仓场景：参考位显示『观察』", h2.deep("refs").includes("观察"), h2.deep("refs").slice(0, 200));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
