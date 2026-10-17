@@ -63,6 +63,24 @@ class El {
   getContext() { return CTX; }
 }
 
+/* 合成 3 天东财分时（用于多周期/3 日背景）：120 点/天，价格缓慢上行 */
+function makeEmPayload() {
+  const days = ["2026-10-14", "2026-10-15", "2026-10-16"];
+  const trends = [];
+  let px = 160;
+  days.forEach((d, di) => {
+    for (let i = 0; i < 120; i++) {
+      px += 0.03 + Math.sin((i + di * 30) / 5) * 0.02;
+      const o = +(px - 0.02).toFixed(2), c = +px.toFixed(2);
+      const vol = 1000 + (i % 5) * 300;
+      const hh = 9 + Math.floor((30 + i) / 60), mm = (30 + i) % 60;
+      const t = d + " " + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+      trends.push(t + "," + o + "," + c + "," + (c + 0.05).toFixed(2) + "," + (o - 0.05).toFixed(2) + "," + vol + "," + (vol * c).toFixed(2) + "," + c);
+    }
+  });
+  return { rc: 0, data: { code: "603083", name: "剑桥科技", preClose: 158.0, trends } };
+}
+
 function makeHarness(seedStore, payloadFor) {
   const ids = new Map();
   const byId = (id) => { if (!ids.has(id)) ids.set(id, new El("div")); return ids.get(id); };
@@ -76,7 +94,9 @@ function makeHarness(seedStore, payloadFor) {
   const mem = new Map(seedStore ? [["hk-radar-pwa-v1", JSON.stringify(seedStore)]] : []);
   const ls = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
   const fetchShim = async (url) => {
-    const code = decodeURIComponent(url.split("code=")[1] || "");
+    const u = String(url);
+    if (u.indexOf("trends2") >= 0) return { ok: true, json: async () => makeEmPayload() };
+    const code = decodeURIComponent(u.split("code=")[1] || "");
     const payload = payloadFor(code);
     if (!payload) return { ok: true, json: async () => ({ code: 0, data: {} }) };
     return { ok: true, json: async () => payload };
@@ -238,6 +258,38 @@ ok("A股场景：加仓参考被过滤到风控线 160 之上",
   C.intradayRefs({ price: 168.51, high: 174, low: 166.58, open: 174, prevClose: 167.2, vwap: 169.9, vwapDevPct: -0.8, volRatio: 1 }, [], { shares: 100, cost: 175 }, { code: "sh603083", plan: PLAN }).add.every((x) => x.price > 160));
 // 全新安装场景：无持仓 → 减仓一侧应为「观察」
 ok("空仓场景：参考位显示『观察』", h2.deep("refs").includes("观察"), h2.deep("refs").slice(0, 200));
+
+
+/* ---------- 6) 多周期 K 线（5/15/30/60）+ 3 日背景 ---------- */
+console.log("\n[多周期 K 线与 3 日背景]");
+ok("页面包含『多周期节奏』卡片", html.includes("多周期节奏") && html.includes('id="mp"'));
+ok("核心导出多周期函数", !!(C.buildBars && C.ema && C.periodStats && C.multiPeriod && C.threeDayContext && C.shortTermPlan));
+const mpBars = C.buildBars([
+  { date: "20261016", hhmm: "0930", slot: 0, price: 10, volInc: 100 },
+  { date: "20261016", hhmm: "0931", slot: 1, price: 10.2, volInc: 100 },
+  { date: "20261016", hhmm: "0945", slot: 15, price: 10.5, volInc: 100 }
+], 15);
+ok("聚合：两天槽位 → 2 根 15 分钟 K", mpBars.length === 2, mpBars.length);
+ok("聚合：首根 OHLC 正确", mpBars[0].o === 10 && mpBars[0].c === 10.2 && mpBars[0].v === 200, mpBars[0]);
+ok("EMA 正确", Math.abs(C.ema([1, 2, 3], 2)[2] - 2.5556) < 1e-3);
+const emPts = C.parseEastmoney(makeEmPayload(), "sh603083").points;
+ok("合成 3 天数据解析成分钟点", emPts.length === 360, emPts.length);
+const mp3 = C.multiPeriod(emPts);
+ok("多周期：4 个周期都有统计", mp3.valid === 4, mp3.valid);
+ok("多周期：上行数据 → 偏多/强多", ["偏多", "强多", "弱多"].includes(mp3.bias), mp3.bias);
+const ctx3 = C.threeDayContext(emPts, 3);
+ok("3 日背景：识别出 3 天", ctx3.days === 3, ctx3.days);
+ok("3 日背景：累计涨跌为正", ctx3.chgPct > 0, ctx3.chgPct);
+ok("3 日背景：区间位置 0–100", ctx3.posInRange >= 0 && ctx3.posInRange <= 100, ctx3.posInRange);
+ok("3 日背景：量能比有值", ctx3.volRatio != null, ctx3.volRatio);
+// 渲染：A 股场景（含历史源）应出现四行周期
+const mpText = h1.deep("mp");
+ok("渲染：多周期卡片有 4 个周期标签", ["5分", "15分", "30分", "60分"].every((x) => mpText.includes(x)), mpText.slice(0, 160));
+ok("渲染：显示共振结论", h1.txt("mpBias").includes("共振"), h1.txt("mpBias"));
+ok("渲染：显示 3 日背景", mpText.includes("近3日"), mpText.slice(-200));
+ok("渲染：显示时机建议", /回踩|减仓|区间|共振|分歧/.test(mpText), mpText.slice(-200));
+// 短周期数据不足时也要能优雅降级
+ok("数据不足时不抛异常", (() => { try { C.shortTermPlan({ price: 10, vwap: 10, vwapDevPct: 0 }, [], { shares: 0, cost: 0 }, { code: "hk06166" }); return true; } catch (e) { return false; } })());
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

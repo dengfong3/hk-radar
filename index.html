@@ -85,6 +85,20 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 .srow.info{border-color:#64748b;color:#cbd5e1}
 .srow.flash{animation:fl .7s ease-out}
 @keyframes fl{0%{background:#334155}100%{}}
+.mp{font-size:12px}
+.mprow{display:flex;align-items:center;gap:6px;padding:4px 5px;border-radius:6px;background:var(--card2);margin-bottom:2px;min-height:32px;font-size:12px}
+.mprow .pl{width:40px;color:#8b9ab1}
+.mprow .pt{width:40px;font-weight:700}
+.mprow .pt.up{color:var(--up)}
+.mprow .pt.down{color:var(--down)}
+.mprow .pt.flat{color:#94a3b8}
+.mprow .ps{width:62px;text-align:right;color:#94a3b8}
+.mprow .pe{flex:1 1 auto;text-align:right;color:#64748b}
+.mprow .pr{width:40px;text-align:right;color:#64748b}
+.mpbias{font-size:12px;color:#cbd5e1;margin:6px 0 2px}
+.mpbias b{font-size:14px}
+.mpnote{font-size:10px;color:#64748b;line-height:1.5;margin-top:3px}
+.mptime{font-size:11px;color:#fbbf24;line-height:1.5;margin-top:4px}
 .refs{font-size:12px}
 .rsep{font-size:10px;color:#64748b;margin:5px 0 2px}
 .rrow{display:flex;align-items:center;gap:6px;padding:4px 5px;border-radius:6px;background:var(--card2);margin-bottom:2px;min-height:32px}
@@ -202,6 +216,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 <div class="card">
   <div class="card-title"><b>日内参考位</b><span class="sp"></span><span id="refsBias" style="font-size:10px"></span></div>
   <div class="refs" id="refs"></div>
+</div>
+
+<div class="card">
+  <div class="card-title"><b>多周期节奏</b><span class="sp"></span><span id="mpBias" style="font-size:10px"></span></div>
+  <div class="mp" id="mp"></div>
 </div>
 
 <div class="card">
@@ -379,13 +398,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (!raw || !raw.length) return { ok: false, error: "分时序列缺失" };
     var volMul = marketOf(code) === "cn" ? 100 : 1;
     var points = [], i, parts, slot, price, cv, ca, v;
+    var prevCum = 0, dateStr = (node.data && node.data.date) || "";
     for (i = 0; i < raw.length; i++) {
       parts = String(raw[i]).trim().split(/\s+/);
       slot = slotOf(parts[0], code);
       price = num(parts[1]); cv = num(parts[2]); ca = num(parts[3]);
       if (slot === null || price === null) continue;
       v = (cv || 0) * volMul;
-      points.push({ hhmm: parts[0], slot: slot, price: price, cumVol: v, cumAmt: ca || 0,
+      var volInc = Math.max(0, v - prevCum);
+      prevCum = v;
+      points.push({ hhmm: parts[0], date: dateStr, slot: slot, price: price, cumVol: v, cumAmt: ca || 0, volInc: volInc,
         vwap: v > 0 && ca > 0 ? ca / v : null });
     }
     var q = qt || [];
@@ -672,19 +694,21 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var d = json && json.data;
     if (!d || !d.trends || !d.trends.length) return { ok: false, error: "备用源无分时数据" };
     var volMul = marketOf(code) === "cn" ? 100 : 1;
-    var points = [], cumVol = 0, cumAmt = 0, hi = null, lo = null, i;
+    var points = [], cumVol = 0, cumAmt = 0, hi = null, lo = null, i, day = "";
     for (i = 0; i < d.trends.length; i++) {
       var p = String(d.trends[i]).split(",");
       var ts = String(p[0] || "").trim().split(/\s+/);
       var hhmm = (ts[1] || "").replace(":", "");
       var price = num(p[2]);
       if (!/^\d{4}$/.test(hhmm) || price === null) continue;
+      var dstr = String(ts[0] || "").replace(/-/g, "");
+      if (dstr && dstr !== day) { day = dstr; cumVol = 0; cumAmt = 0; hi = null; lo = null; }
       var vol = (num(p[5]) || 0) * volMul, amt = num(p[6]) || 0;
       cumVol += vol; cumAmt += amt;
       var h = num(p[3]), l = num(p[4]);
       if (h !== null && (hi === null || h > hi)) hi = h;
       if (l !== null && (lo === null || l < lo)) lo = l;
-      points.push({ hhmm: hhmm, slot: slotOf(hhmm, code), price: price, cumVol: cumVol, cumAmt: cumAmt,
+      points.push({ hhmm: hhmm, date: day, slot: slotOf(hhmm, code), price: price, cumVol: cumVol, cumAmt: cumAmt, volInc: vol,
         vwap: cumVol > 0 && cumAmt > 0 ? cumAmt / cumVol : null });
     }
     if (!points.length) return { ok: false, error: "备用源分时为空" };
@@ -815,6 +839,227 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     return refs;
   }
 
+    /**
+     * 把分钟点聚合成 N 分钟 K 线。
+     * 跨日自动分组（用 point.date），成交量用 volInc 累加；不依赖任何新接口。
+     */
+    function buildBars(points, minutes) {
+      const bars = [];
+      let cur = null;
+      for (const p of points || []) {
+        if (p.price == null || p.slot == null) continue;
+        const key = (p.date || "") + "|" + Math.floor(p.slot / minutes);
+        const inc = Number.isFinite(p.volInc) ? p.volInc : 0;
+        if (!cur || cur.key !== key) {
+          cur = { key, date: p.date || "", slot: p.slot, t: p.hhmm,
+            o: p.price, h: p.price, l: p.price, c: p.price, v: inc };
+          bars.push(cur);
+        } else {
+          if (p.price > cur.h) cur.h = p.price;
+          if (p.price < cur.l) cur.l = p.price;
+          cur.c = p.price;
+          cur.v += inc;
+        }
+      }
+      for (const b of bars) {
+        b.chg = b.o > 0 ? (b.c - b.o) / b.o * 100 : 0;
+        b.rng = b.o > 0 ? (b.h - b.l) / b.o * 100 : 0;
+      }
+      return bars;
+    }
+
+    /** EMA（指数移动平均） */
+    function ema(values, n) {
+      if (!values || !values.length) return [];
+      const k = 2 / (n + 1);
+      const out = [values[0]];
+      for (let i = 1; i < values.length; i++) out.push(values[i] * k + out[i - 1] * (1 - k));
+      return out;
+    }
+
+    /** 单周期统计：趋势（EMA5/EMA20 + 斜率）、摆动高低、量能、RSI14 */
+    function periodStats(bars, label, minutes) {
+      const n = bars.length;
+      if (n < 5) return null;
+      const closes = bars.map((b) => b.c);
+      const e5 = ema(closes, 5), e20 = ema(closes, 20);
+      const last = bars[n - 1];
+      const win = bars.slice(-Math.min(20, n));
+      let swingHigh = -Infinity, swingLow = Infinity;
+      for (const b of win) { if (b.h > swingHigh) swingHigh = b.h; if (b.l < swingLow) swingLow = b.l; }
+      let avgVol = null;
+      const vw = bars.slice(Math.max(0, n - 21), n - 1);
+      if (vw.length >= 3) {
+        let sv = 0;
+        for (const b of vw) sv += b.v;
+        avgVol = sv / vw.length;
+      }
+      const slopePct = n >= 6 ? (last.c - bars[n - 6].o) / bars[n - 6].o * 100 : null;
+      let rsi = null;
+      if (n >= 15) {
+        let gain = 0, loss = 0;
+        for (let i = n - 14; i < n; i++) {
+          const d = closes[i] - closes[i - 1];
+          if (d >= 0) gain += d; else loss -= d;
+        }
+        rsi = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+      }
+      const up = e5[n - 1] > e20[n - 1] && (slopePct == null || slopePct > 0);
+      const down = e5[n - 1] < e20[n - 1] && (slopePct == null || slopePct < 0);
+      const trend = up ? "up" : down ? "down" : "flat";
+      return {
+        label, minutes, bars: n, trend,
+        trendText: { up: "多头", down: "空头", flat: "缠绕" }[trend],
+        ema5: e5[n - 1], ema20: e20[n - 1], slopePct,
+        swingHigh, swingLow, lastClose: last.c,
+        volRatio: avgVol > 0 ? last.v / avgVol : null, rsi
+      };
+    }
+
+    /** 多周期共振：5 / 15 / 30 / 60 分钟 */
+    function multiPeriod(points) {
+      const defs = [[5, "5分"], [15, "15分"], [30, "30分"], [60, "60分"]];
+      const byPeriod = {};
+      let score = 0, valid = 0;
+      const res = [], sup = [];
+      for (const [m, label] of defs) {
+        const st = periodStats(buildBars(points, m), label, m);
+        byPeriod[m] = st;
+        if (!st) continue;
+        valid++;
+        if (st.trend === "up") score++;
+        else if (st.trend === "down") score--;
+        res.push(st.swingHigh);
+        sup.push(st.swingLow);
+        if (st.ema20) { res.push(st.ema20); sup.push(st.ema20); }
+      }
+      const bias = score >= 3 ? "强多" : score === 2 ? "偏多" : score === 1 ? "弱多"
+        : score === 0 ? "震荡" : score === -1 ? "弱空" : score === -2 ? "偏空" : "强空";
+      const uniq = (arr) => Array.from(new Set(arr.filter((x) => Number.isFinite(x)).map((x) => +x.toFixed(2))));
+      return {
+        byPeriod, score, valid, bias,
+        keyRes: uniq(res).sort((a, b) => b - a),
+        keySup: uniq(sup).sort((a, b) => b - a)
+      };
+    }
+
+    /** 近 3 日背景：从多日分钟数据聚合出日线，算累计涨跌/量能/区间位置/缺口 */
+    function threeDayContext(points, days) {
+      const byDay = {};
+      const order = [];
+      for (const p of points || []) {
+        const d = p.date || "";
+        if (!d || p.price == null) continue;
+        if (!byDay[d]) { byDay[d] = { date: d, o: p.price, h: p.price, l: p.price, c: p.price, v: 0 }; order.push(d); }
+        const o = byDay[d];
+        if (p.price > o.h) o.h = p.price;
+        if (p.price < o.l) o.l = p.price;
+        o.c = p.price;
+        o.v += (p.volInc || 0);
+      }
+      const list = order.sort().map((d) => byDay[d]).slice(-(days || 3));
+      const out = { days: list.length, list, chgPct: null, high: null, low: null,
+        posInRange: null, volRatio: null, gapPct: null, dayChgs: [] };
+      if (!list.length) return out;
+      const first = list[0], last = list[list.length - 1];
+      if (list.length >= 2) {
+        out.chgPct = first.o > 0 ? (last.c - first.o) / first.o * 100 : null;
+        let hi = -Infinity, lo = Infinity;
+        for (const d of list) { if (d.h > hi) hi = d.h; if (d.l < lo) lo = d.l; }
+        out.high = hi; out.low = lo;
+        out.posInRange = hi > lo ? (last.c - lo) / (hi - lo) * 100 : null;
+        const vols = list.map((d) => d.v);
+        const prev = vols.slice(0, -1);
+        const prevAvg = prev.length ? prev.reduce((a, b) => a + b, 0) / prev.length : 0;
+        out.volRatio = prevAvg > 0 ? vols[vols.length - 1] / prevAvg : null;
+        const prevDay = list[list.length - 2];
+        out.gapPct = prevDay.c > 0 ? (last.o - prevDay.c) / prevDay.c * 100 : null;
+      }
+      out.dayChgs = list.map((d) => ({ date: d.date, chg: d.o > 0 ? (d.c - d.o) / d.o * 100 : 0, vol: d.v }));
+      return out;
+    }
+
+    /**
+     * 短线综合建议：把「多周期共振」+「3 日背景」+「日内机械位」合成一套可执行参考。
+     * 仍然只是机械参考，不是预测、不是投资建议。
+     */
+    function shortTermPlan(m, points, pos, opts) {
+      const code = (opts && opts.code) || DEFAULT_CODE;
+      const plan = (opts && "plan" in opts) ? opts.plan : null;
+      const mp = (opts && opts.multi) || multiPeriod(points);
+      const ctx = (opts && opts.ctx3) || threeDayContext(points, 3);
+      const refs = intradayRefs(m, points, pos, opts);
+      const price = m && m.price;
+      const out = { ok: !!refs.ok, bias: mp.bias, score: mp.score, valid: mp.valid,
+        mp, ctx, reduce: [], add: [], notes: [], timing: "", disclaimer: refs.disclaimer };
+      if (!out.ok) return out;
+      const shares = pos && pos.shares > 0 ? pos.shares : 0;
+      const lot = lotOf(code);
+      const inRange = (x) => x > price * 1.003 && x < price * 1.09;
+      const inRangeDown = (x) => x < price * 0.997 && x > price * 0.91;
+
+      // 候选：日内机械位 + 多周期关键位
+      const cands = [];
+      for (const r of refs.reduce) cands.push({ price: r.price, why: r.why, conf: r.conf, side: "reduce" });
+      for (const r of refs.add) cands.push({ price: r.price, why: r.why, conf: r.conf, side: "add" });
+      for (const m2 of [5, 15, 30, 60]) {
+        const st = mp.byPeriod[m2];
+        if (!st) continue;
+        if (inRange(st.swingHigh)) cands.push({ price: st.swingHigh, why: st.label + " 摆动高", conf: "中", side: "reduce" });
+        if (inRangeDown(st.swingLow)) cands.push({ price: st.swingLow, why: st.label + " 摆动低", conf: "中", side: "add" });
+        if (st.ema20 && inRange(st.ema20)) cands.push({ price: st.ema20, why: st.label + " EMA20", conf: "中", side: "reduce" });
+        if (st.ema20 && inRangeDown(st.ema20)) cands.push({ price: st.ema20, why: st.label + " EMA20", conf: "中", side: "add" });
+      }
+      // 合并去重（0.3% 内）
+      const merged = [];
+      for (const c of cands) {
+        const hit = merged.find((x) => x.side === c.side && Math.abs(x.price - c.price) / price < 0.003);
+        if (hit) { hit.tags = (hit.tags || 0) + 1; if (hit.conf === "弱" && c.conf !== "弱") hit.conf = c.conf; }
+        else merged.push({ price: c.price, why: c.why, conf: c.conf, side: c.side, tags: 1 });
+      }
+      // 多周期共振加分：趋势与操作方向一致 → 强度升级
+      const boost = (side) => (mp.score >= 2 && side === "add") || (mp.score <= -2 && side === "reduce");
+      for (const x of merged) {
+        if (boost(x.side)) x.conf = x.conf === "弱" ? "中" : "强";
+        if (x.tags >= 2 && x.conf !== "强") x.conf = "中";
+      }
+      out.reduce = merged.filter((x) => x.side === "reduce").sort((a, b) => a.price - b.price).slice(0, 3);
+      out.add = merged.filter((x) => x.side === "add").sort((a, b) => b.price - a.price).slice(0, 3);
+      for (const r of out.reduce) r.qty = shares > 0 ? Math.min(lot, shares) : 0;
+      for (const r of out.add) {
+        r.qty = shares <= 0 ? lot : (plan && plan.maxShares && shares >= plan.maxShares ? 0 : lot);
+      }
+
+      // 时机建议（只说结构，不保证结果）
+      if (mp.valid >= 3 && mp.score >= 3) {
+        out.timing = "多周期共振向上：回踩加仓、冲高减仓；别追高";
+      } else if (mp.valid >= 3 && mp.score <= -3) {
+        out.timing = "多周期共振向下：反弹减仓为主，少接飞刀";
+      } else if (mp.valid >= 3 && mp.score === 0) {
+        out.timing = "多周期方向分歧：区间对待，等 15/30 分钟给方向再动手";
+      } else if (mp.valid >= 3 && mp.score > 0) {
+        out.timing = "偏多但周期有分歧：回踩再看，不追高";
+      } else if (mp.valid >= 3 && mp.score < 0) {
+        out.timing = "偏空但周期有分歧：反弹减仓，不追空";
+      } else {
+        out.timing = "周期数据不足：只按日内参考位轻仓试探";
+      }
+      // 风险提示
+      const conflicts = [];
+      for (const m2 of [5, 15, 30, 60]) {
+        const st = mp.byPeriod[m2];
+        if (st && st.rsi != null && st.rsi >= 70) conflicts.push(st.label + " RSI " + st.rsi.toFixed(0) + " 超买");
+        if (st && st.rsi != null && st.rsi <= 30) conflicts.push(st.label + " RSI " + st.rsi.toFixed(0) + " 超卖");
+      }
+      if (conflicts.length) out.notes.push(conflicts.join("；"));
+      if (ctx.volRatio != null) out.notes.push("今日量能 / 前期均量 = " + ctx.volRatio.toFixed(2) + "（" + (ctx.volRatio >= 1.5 ? "放量" : ctx.volRatio <= 0.7 ? "缩量" : "量平") + "）");
+      if (ctx.posInRange != null) out.notes.push("3 日区间位置 " + ctx.posInRange.toFixed(0) + "%（0=3日低点 100=3日高点）");
+      if (ctx.gapPct != null && Math.abs(ctx.gapPct) >= 1) out.notes.push("今日跳空 " + (ctx.gapPct > 0 ? "+" : "") + ctx.gapPct.toFixed(1) + "%：跳空后价格规则要打折");
+      if (ctx.chgPct != null) out.notes.push("近 " + ctx.days + " 日累计 " + (ctx.chgPct >= 0 ? "+" : "") + ctx.chgPct.toFixed(1) + "%");
+      return out;
+    }
+
+
   function shouldAlert(sig, nowMs, lastFired, muteUntil) {
     if (!sig || !ALERTABLE[sig.level]) return false;
     if (muteUntil && nowMs < muteUntil) return false;
@@ -832,6 +1077,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     fmtQuoteTime: fmtQuoteTime, slotOf: slotOf, parsePayload: parsePayload, computeMetrics: computeMetrics,
     evaluateSignals: evaluateSignals, buildLadder: buildLadder, marketPhase: marketPhase,
     lotOf: lotOf, eastmoneySecid: eastmoneySecid, parseEastmoney: parseEastmoney, intradayRefs: intradayRefs,
+    buildBars: buildBars, ema: ema, periodStats: periodStats, multiPeriod: multiPeriod,
+    threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
     phaseText: phaseText, pollDelay: pollDelay, aggregate5m: aggregate5m, shouldAlert: shouldAlert
   };
 })(typeof window !== "undefined" ? window : globalThis);
@@ -1229,6 +1476,53 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       noPlan.textContent = "该代码未设交易计划：填「股数+成本」后只显示回本价与资金止损；点下方「编辑」可设你自己的减仓档/止损线。";
     } else noPlan.style.display = "none";
 
+    // 多周期节奏：5/15/30/60 分钟 + 3 日背景 + 时机
+    (function () {
+      var mpBox = $("mp"); mpBox.textContent = "";
+      var biasEl = $("mpBias");
+      if (!mpData || !mpData.valid) {
+        biasEl.textContent = "";
+        var no = document.createElement("div"); no.className = "mpnote";
+        no.textContent = "周期数据不足（开盘几分钟后再看）";
+        mpBox.appendChild(no);
+        return;
+      }
+      biasEl.textContent = "共振 " + mpData.bias + "（" + (mpData.score > 0 ? "+" : "") + mpData.score + "/" + mpData.valid + "）";
+      [5, 15, 30, 60].forEach(function (mm) {
+        var st = mpData.byPeriod[mm];
+        if (!st) return;
+        var row = document.createElement("div"); row.className = "mprow";
+        var a = document.createElement("span"); a.className = "pl"; a.textContent = st.label;
+        var b = document.createElement("span"); b.className = "pt " + st.trend; b.textContent = st.trendText;
+        var c = document.createElement("span"); c.className = "ps";
+        c.textContent = st.slopePct == null ? "--" : (st.slopePct >= 0 ? "+" : "") + st.slopePct.toFixed(2) + "%";
+        var d = document.createElement("span"); d.className = "pe";
+        d.textContent = st.ema20 == null ? "--" : "EMA20 " + st.ema20.toFixed(2);
+        var e = document.createElement("span"); e.className = "pr";
+        e.textContent = st.rsi == null ? "--" : "R" + st.rsi.toFixed(0);
+        row.appendChild(a); row.appendChild(b); row.appendChild(c); row.appendChild(d); row.appendChild(e);
+        mpBox.appendChild(row);
+      });
+      var bia = document.createElement("div"); bia.className = "mpbias";
+      bia.innerHTML = "共振：<b>" + mpData.bias + "</b>（" + (mpData.score > 0 ? "+" : "") + mpData.score + "/" + mpData.valid + " 个周期同向）";
+      mpBox.appendChild(bia);
+      var sp = C.shortTermPlan(m, points || [], pos, { code: st.code, plan: plan, multi: mpData, ctx3: ctx3Data });
+      if (sp.timing) { var tt = document.createElement("div"); tt.className = "mptime"; tt.textContent = sp.timing; mpBox.appendChild(tt); }
+      if (ctx3Data && ctx3Data.days >= 2) {
+        var bits = [];
+        if (ctx3Data.chgPct != null) bits.push("近" + ctx3Data.days + "日 " + (ctx3Data.chgPct >= 0 ? "+" : "") + ctx3Data.chgPct.toFixed(1) + "%");
+        if (ctx3Data.posInRange != null) bits.push("区间位 " + ctx3Data.posInRange.toFixed(0) + "%");
+        if (ctx3Data.volRatio != null) bits.push("量比 " + ctx3Data.volRatio.toFixed(2));
+        if (ctx3Data.gapPct != null && Math.abs(ctx3Data.gapPct) >= 0.3) bits.push("跳空 " + (ctx3Data.gapPct >= 0 ? "+" : "") + ctx3Data.gapPct.toFixed(1) + "%");
+        if (bits.length) { var l3 = document.createElement("div"); l3.className = "mpnote"; l3.textContent = bits.join(" · "); mpBox.appendChild(l3); }
+      } else if (ctx3Data) {
+        var l4 = document.createElement("div"); l4.className = "mpnote";
+        l4.textContent = "历史源不可用：仅今日多周期（3 日背景需历史数据）";
+        mpBox.appendChild(l4);
+      }
+      if (sp.notes && sp.notes.length) { var nn = document.createElement("div"); nn.className = "mpnote"; nn.textContent = sp.notes.join(" · "); mpBox.appendChild(nn); }
+    })();
+
     // 日内参考位（机械计算：当天分钟数据推出，非预测、非建议）
     (function () {
       var refs = C.intradayRefs(m, points || [], pos, { code: st.code, plan: plan });
@@ -1337,6 +1631,29 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     chart();
   }
 
+  /* 3 天历史（多周期 K 线与 3 日背景用；慢速拉取，失败降级为仅今日） */
+  var historyPoints = null, historyAt = 0, historyCode = "", mpData = null, ctx3Data = null;
+  function mergePoints(history, today) {
+    if (!history || !history.length) return today || [];
+    var todayDate = today && today.length ? (today[0].date || "") : "";
+    var hist = todayDate ? history.filter(function (p) { return p.date !== todayDate; }) : history.slice();
+    return hist.concat(today || []);
+  }
+  function fetchHistory(code) {
+    var secid = C.eastmoneySecid(code);
+    if (!secid) return Promise.reject(new Error("无备用源"));
+    var url = "https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=" + secid +
+      "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13" +
+      "&fields2=f51,f52,f53,f54,f55,f56,f57,f58&iscr=0&ndays=3";
+    return fetch(url, { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("历史源 HTTP " + r.status); return r.json(); })
+      .then(function (json) {
+        var p = C.parseEastmoney(json, code);
+        if (!p || !p.ok) throw new Error("历史源无数据");
+        return p.points;
+      });
+  }
+
   /* 行情抓取：主源腾讯分钟线 → 失败自动切东方财富（不同厂商，独立可用性） */
   var lastSource = "腾讯";
   function fetchQuote(code) {
@@ -1372,7 +1689,20 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         if (requested !== st.code) return;
         parsed = p; metrics = C.computeMetrics(p, null, requested); lastOk = Date.now();
         lastSource = p.source === "eastmoney" ? "东财" : "腾讯";
+        var allPts = mergePoints(historyPoints, p.points);
+        mpData = C.multiPeriod(allPts);
+        ctx3Data = C.threeDayContext(allPts, 3);
         render(metrics, p.points);
+        if (historyCode !== requested || !historyPoints || Date.now() - historyAt > 180000) {
+          fetchHistory(requested).then(function (pts) {
+            if (!pts || !pts.length || requested !== st.code) return;
+            historyPoints = pts; historyAt = Date.now(); historyCode = requested;
+            var all = mergePoints(historyPoints, parsed ? parsed.points : []);
+            mpData = C.multiPeriod(all);
+            ctx3Data = C.threeDayContext(all, 3);
+            if (metrics) render(metrics, parsed.points);
+          }).catch(function () {});
+        }
       })
       .catch(function (e) {
         if (requested !== st.code) return;
