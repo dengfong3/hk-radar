@@ -418,7 +418,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var rawTurn = num(q[37]);
     var turnover = (rawTurn == null || rawTurn === 0) ? null : (marketOf(code) === "cn" ? rawTurn * 10000 : rawTurn);
     var quote = {
-      name: q[1] || "", code: q[2] || code, price: num(q[3]), prevClose: num(q[4]), open: num(q[5]),
+      name: (q[1] || "").replace(/\uFFFD/g, ""), code: q[2] || code, price: num(q[3]), prevClose: num(q[4]), open: num(q[5]),
       volume: num(q[6]), time: fmtQuoteTime(q[30]), change: num(q[31]), changePct: num(q[32]),
       high: num(q[33]), low: num(q[34]), turnover: turnover, pe: num(q[39]), amplitude: num(q[43]),
       high52: num(q[48]), low52: num(q[49]), lotSize: num(q[59])
@@ -678,6 +678,17 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     }
     return bars;
   }
+
+    /** 按指定编码解字节（腾讯快照是 GBK；response.text() 固定按 UTF-8 解，会中文乱码） */
+    function decodeText(buf, charset) {
+      try {
+        if (typeof TextDecoder !== "undefined") return new TextDecoder(charset || "utf-8").decode(buf);
+      } catch (e) { /* 该浏览器不支持此编码 → 回退 */ }
+      try {
+        if (typeof TextDecoder !== "undefined") return new TextDecoder("utf-8").decode(buf);
+      } catch (e) { /* 忽略 */ }
+      return "";
+    }
 
     /**
      * 腾讯快照解析（第三兜底）：只给报价，没有分时。
@@ -1120,7 +1131,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     evaluateSignals: evaluateSignals, buildLadder: buildLadder, marketPhase: marketPhase,
     lotOf: lotOf, eastmoneySecid: eastmoneySecid, parseEastmoney: parseEastmoney, intradayRefs: intradayRefs,
     buildBars: buildBars, ema: ema, periodStats: periodStats, multiPeriod: multiPeriod,
-    parseTencentSnapshot: parseTencentSnapshot, backoffDelay: backoffDelay,
+    parseTencentSnapshot: parseTencentSnapshot, backoffDelay: backoffDelay, decodeText: decodeText,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
     phaseText: phaseText, pollDelay: pollDelay, aggregate5m: aggregate5m, shouldAlert: shouldAlert
   };
@@ -1450,7 +1461,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   function render(m, points) {
     var phase = C.marketPhase(new Date(), st.code);
     $("phase").textContent = C.phaseText(phase);
-    var nameNow = (parsed && parsed.quote.name) || "";
+    var rawName = (parsed && parsed.quote.name) || "";
+    var nameNow = /\uFFFD/.test(rawName) ? "" : rawName;   // 编码异常时不显示名字
     $("name").textContent = (nameNow ? nameNow + " " : "") + C.displayCode(st.code);
     document.title = (nameNow || C.displayCode(st.code)) + " · 盯盘雷达";
     if (m.price == null) { $("px").textContent = "--"; return; }
@@ -1746,9 +1758,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         if (p2r) return p2r;
         // 3) 腾讯快照（只有报价）
         return fetch("https://qt.gtimg.cn/q=" + encodeURIComponent(code), { cache: "no-store" })
-          .then(function (r) { if (!r.ok) throw new Error("快照源 HTTP " + r.status); return r.text(); })
-          .then(function (txt) {
-            var p3 = C.parseTencentSnapshot(txt, code);
+          .then(function (r) { if (!r.ok) throw new Error("快照源 HTTP " + r.status); return r.arrayBuffer(); })
+          .then(function (buf) {
+            var p3 = C.parseTencentSnapshot(C.decodeText(buf, "gbk"), code);
             if (!p3) throw new Error("快照解析失败");
             return p3;
           })

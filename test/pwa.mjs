@@ -97,8 +97,10 @@ function makeHarness(seedStore, payloadFor, opts) {
     const u = String(url);
     const o = opts || {};
     if (o.snapshotOnly) {
-      if (u.indexOf("qt.gtimg.cn") >= 0) return { ok: true, text: async () => o.snapshotText };
-      return { ok: false, status: 501, json: async () => ({}), text: async () => "" };
+      if (u.indexOf("qt.gtimg.cn") >= 0) {
+        return { ok: true, arrayBuffer: async () => o.snapshotBuffer, text: async () => "" };
+      }
+      return { ok: false, status: 501, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0), text: async () => "" };
     }
     if (u.indexOf("trends2") >= 0) return { ok: true, json: async () => makeEmPayload() };
     const code = decodeURIComponent(u.split("code=")[1] || "");
@@ -317,19 +319,27 @@ ok("页面包含快照模式提示与三源兜底", html.includes("快照模式"
 /* ---------- 8) 最坏情况：分钟线 501 + 东财拒绝 → 快照兜底仍能报价 ---------- */
 console.log("\n[三源全挂时的快照兜底]");
 const sq2 = new Array(60).fill("0");
-sq2[1] = "剑桥科技"; sq2[2] = "06166"; sq2[3] = "84.150"; sq2[4] = "81.600"; sq2[5] = "85.850"; sq2[6] = "9825285.0";
+sq2[0] = "100"; sq2[2] = "06166"; sq2[3] = "84.150"; sq2[4] = "81.600"; sq2[5] = "85.850"; sq2[6] = "9825285.0";
 sq2[30] = "2026/10/16 16:08:22"; sq2[31] = "2.550"; sq2[32] = "3.13"; sq2[33] = "87.650"; sq2[34] = "82.750";
 sq2[37] = "837019141.750"; sq2[39] = "111.55"; sq2[43] = "6.00"; sq2[48] = "172.900"; sq2[49] = "60.500"; sq2[59] = "50";
+// 用真实 GBK 字节拼出快照响应（"剑桥科技" = BD A3 C7 C5 BF C6 BC BC）
+const head = 'v_hk06166="' + sq2[0] + "~";
+const tail = "~" + sq2.slice(2).join("~") + '";';
+const asciiBytes = (s) => Array.from(s).map((c) => c.charCodeAt(0));
+const nameGbk = [0xBD, 0xA3, 0xC7, 0xC5, 0xBF, 0xC6, 0xBC, 0xBC];
+const gbkBytes = Uint8Array.from([].concat(asciiBytes(head), nameGbk, asciiBytes(tail)));
 const h3 = makeHarness(
   { code: "hk06166", watch: ["hk06166"], sound: false, chartMode: "min",
     pos: { hk06166: { shares: 200, cost: 96.7, realized: 0 } }, plans: {}, trade: {}, lastFired: {} },
   () => null,
-  { snapshotOnly: true, snapshotText: 'v_hk06166="' + sq2.join("~") + '";' });
+  { snapshotOnly: true, snapshotBuffer: gbkBytes.buffer });
 let threw3 = null;
 try { h3.run(coreSrc); h3.run(uiSrc); } catch (e) { threw3 = e; }
 ok("快照场景：脚本执行无异常", !threw3, threw3 && threw3.message);
 await new Promise((r) => setTimeout(r, 350));
+ok("GBK 解码：字节 → 剑桥科技", C.decodeText(gbkBytes, "gbk").includes("剑桥科技"), C.decodeText(gbkBytes, "gbk").slice(0, 40));
 ok("快照场景：仍能显示现价 84.15", h3.txt("px") === "84.15", h3.txt("px"));
+ok("快照场景：中文名不乱码", h3.txt("name").includes("剑桥科技"), h3.txt("name"));
 ok("快照场景：显示涨跌幅 +3.13%", h3.txt("chg").includes("+3.13"), h3.txt("chg"));
 ok("快照场景：提示『快照模式』", h3.txt("snapHint").includes("快照模式"), h3.txt("snapHint"));
 ok("快照场景：数据时间标『快照』", h3.txt("qtime").includes("快照"), h3.txt("qtime"));

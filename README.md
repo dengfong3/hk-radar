@@ -36,7 +36,7 @@ hk-radar-pwa/
   icon-192.png / icon-512.png   # 图标
   make_icons.py           # 重新生成图标的脚本（可选）
   preview-mobile.png      # 手机端渲染截图（390 宽）
-  test/pwa.mjs            # 自动化验证（98 项断言）
+  test/pwa.mjs            # 自动化验证（100 项断言）
   README.md               # 本文件
 ```
 
@@ -145,6 +145,12 @@ hk-radar-pwa/
 ![日内参考位（A股示例）](preview-refs.png)
 
 ---
+
+### 编码坑（已修）
+
+腾讯快照 qt.gtimg.cn 是 **GBK** 编码，而 
+esponse.text() 固定按 UTF-8 解 → 中文名会变 �。
+现在快照改用 rrayBuffer() + TextDecoder(gbk)，并且名字出现替换字符时直接不显示。
 
 ## 三点六、三源兜底与限流自保（v0.5）
 
@@ -292,7 +298,7 @@ git add -A; git commit -m "update"; git push
 
 ```powershell
 cd E:\12-1-good\hk-radar-pwa
-node test/pwa.mjs        # 98 项：静态合规检查 + 假 DOM 两个场景 + 计划编辑器 + 日内参考位 + 备用源
+node test/pwa.mjs        # 100 项：静态合规检查 + 假 DOM 两个场景 + 计划编辑器 + 日内参考位 + 备用源
 ```
 
 测试会检查：
