@@ -16,6 +16,10 @@
 | sw.js | 200 application/javascript |
 | 图标 192/512 | 200 image/png |
 
+手机扫码直接打开：
+
+![扫码打开](qr-live.png)
+
 ![手机端实际渲染（390×844，headless 真测）](preview-mobile.png)
 
 ![线上部署实测（2026-10-17，现价 84.15）](preview-live.png)
