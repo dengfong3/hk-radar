@@ -1758,6 +1758,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     $("tradeInfo").textContent = "今日 T：" + (tr.count || 0) + " 次 · 累计成本 ≈ " + Math.round(tr.cost || 0) + " " + lab +
       "（≈ 本金的 " + (((tr.cost || 0) / principal) * 100).toFixed(2) + "%）";
     $("posUnit").textContent = "单位：" + lab;
+    var fh = $("footHealth"); if (fh) fh.textContent = C.srcHealthText(st.srcStats);
     $("inCost").placeholder = lab; $("inRealized").placeholder = lab;
     chart();
   }

@@ -402,6 +402,7 @@ ok("统计：成功/失败计数正确", hh.tencent === 1 && hh.fail === 1 && hh
 ok("统计：恢复后累计不可用 115s", hh.downMs === 115000 && hh.downStart === 0, [hh.downMs, hh.downStart]);
 ok("统计：文案含累计不可用", C.srcHealthText(hh).includes("累计不可用"), C.srcHealthText(hh));
 ok("渲染：页脚显示源健康", h1.txt("footHealth").includes("源健康"), h1.txt("footHealth"));
+ok("渲染：一次成功取数后腾讯计数 +1", /腾讯 1/.test(h1.txt("footHealth")), h1.txt("footHealth"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
