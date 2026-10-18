@@ -391,5 +391,17 @@ ok("线路切换：主线路 501 时仍显示现价 168.51", h4.txt("px") === "1
 ok("线路切换：数据完整（均价 169.9）", h4.deep("grid").includes("169.90"), h4.deep("grid"));
 ok("线路切换：未误报警告条（不是快照模式）", h4.txt("snapHint") === "", h4.txt("snapHint"));
 
+
+/* ---------- 12) 源健康统计 ---------- */
+console.log("\n[源健康统计]");
+ok("页面含源健康行", html.includes("footHealth") && html.includes("源健康"));
+const hh = C.bumpSrcHealth({}, "tencent", 1000);
+C.bumpSrcHealth(hh, "fail", 5000);
+C.bumpSrcHealth(hh, "eastmoney", 120000);
+ok("统计：成功/失败计数正确", hh.tencent === 1 && hh.fail === 1 && hh.eastmoney === 1, hh);
+ok("统计：恢复后累计不可用 115s", hh.downMs === 115000 && hh.downStart === 0, [hh.downMs, hh.downStart]);
+ok("统计：文案含累计不可用", C.srcHealthText(hh).includes("累计不可用"), C.srcHealthText(hh));
+ok("渲染：页脚显示源健康", h1.txt("footHealth").includes("源健康"), h1.txt("footHealth"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

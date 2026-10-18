@@ -36,7 +36,7 @@ hk-radar-pwa/
   icon-192.png / icon-512.png   # 图标
   make_icons.py           # 重新生成图标的脚本（可选）
   preview-mobile.png      # 手机端渲染截图（390 宽）
-  test/pwa.mjs            # 自动化验证（112 项断言）
+  test/pwa.mjs            # 自动化验证（117 项断言）
   README.md               # 本文件
 ```
 
@@ -192,6 +192,12 @@ esponse.text() 固定按 UTF-8 解 → 中文名会变 �。
 
 **纯前端免费源到此为止；要更多源只能用后端代理。**
 
+### 源健康统计（v0.7）
+
+页面最底部显示：源健康（自 2026-10-18）：腾讯 1203 · 东财 4 · 快照 0 · 失败 2 · 累计不可用 1分30秒
+
+跑几天后看「失败」和「累计不可用」就能判断 7 端点够不够用；数据只在本机 localStorage，不上传。
+
 ## 三点六、三源兜底与限流自保（v0.5）
 
 | 顺序 | 数据源 | 能力 | 备注 |
@@ -338,7 +344,7 @@ git add -A; git commit -m "update"; git push
 
 ```powershell
 cd E:\12-1-good\hk-radar-pwa
-node test/pwa.mjs        # 112 项：静态合规检查 + 假 DOM 两个场景 + 计划编辑器 + 日内参考位 + 备用源
+node test/pwa.mjs        # 117 项：静态合规检查 + 假 DOM 两个场景 + 计划编辑器 + 日内参考位 + 备用源
 ```
 
 测试会检查：

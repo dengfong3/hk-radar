@@ -266,6 +266,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
 <div class="foot">
   <span id="footVer">版本 —</span>
+  <span id="footHealth" style="flex-basis:100%"></span>
   <button id="btnForce" title="清除缓存并重新加载最新版本">⟳ 强制更新</button>
   <div>数据：腾讯行情公开接口 · 本机保存，不上传任何数据</div>
 </div>
@@ -708,6 +709,38 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58&iscr=0&ndays=1") : [],
         snapshot: ["https://qt.gtimg.cn/q=" + encodeURIComponent(code)]
       };
+    }
+
+    /* 源健康统计（跑几天观察用） */
+    function todayStr() {
+      var d = new Date();
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    }
+    function bumpSrcHealth(h, kind, nowMs) {
+      if (!h) return h;
+      if (!h.since) h.since = todayStr();
+      if (kind === "fail") {
+        h.fail = (h.fail || 0) + 1;
+        if (!h.downStart) h.downStart = nowMs;
+      } else {
+        h[kind] = (h[kind] || 0) + 1;
+        if (h.downStart) { h.downMs = (h.downMs || 0) + (nowMs - h.downStart); h.downStart = 0; }
+      }
+      return h;
+    }
+    function fmtDown(ms) {
+      if (!ms || ms < 1000) return "0s";
+      var s = Math.round(ms / 1000);
+      if (s < 60) return s + "s";
+      var m = Math.floor(s / 60), r = s % 60;
+      if (m < 60) return m + "分" + r + "秒";
+      return Math.floor(m / 60) + "小时" + (m % 60) + "分";
+    }
+    function srcHealthText(h) {
+      if (!h) return "";
+      return "源健康（自 " + (h.since || "—") + "）：腾讯 " + (h.tencent || 0) +
+        " · 东财 " + (h.eastmoney || 0) + " · 快照 " + (h.snapshot || 0) +
+        " · 失败 " + (h.fail || 0) + " · 累计不可用 " + fmtDown(h.downMs || 0);
     }
 
     /** 按指定编码解字节（腾讯快照是 GBK；response.text() 固定按 UTF-8 解，会中文乱码） */
@@ -1164,6 +1197,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     buildBars: buildBars, ema: ema, periodStats: periodStats, multiPeriod: multiPeriod,
     parseTencentSnapshot: parseTencentSnapshot, backoffDelay: backoffDelay, decodeText: decodeText,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
+    bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
     phaseText: phaseText, pollDelay: pollDelay, aggregate5m: aggregate5m, shouldAlert: shouldAlert
   };
@@ -1177,7 +1211,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.6 · 2026-10-17";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.7 · 2026-10-18";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -1200,6 +1234,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   st.chartMode = st.chartMode || "min";
   if (st.chartMode === "m5") st.chartMode = "5";   // 兼容旧版本存的值
   st.lastFired = st.lastFired || {};
+  st.srcStats = st.srcStats || null;
   st.eventRisk = st.eventRisk || false;
   if (st.watch.indexOf(st.code) < 0) st.watch.unshift(st.code);
 
@@ -1819,6 +1854,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         parsed = p; metrics = C.computeMetrics(p, null, requested); lastOk = Date.now();
         lastSource = p.source === "eastmoney" ? "东财" : (p.source === "tencent-snapshot" ? "快照" : "腾讯");
         failStreak = 0;
+        C.bumpSrcHealth(st.srcStats, p.source === "eastmoney" ? "eastmoney" : (p.source === "tencent-snapshot" ? "snapshot" : "tencent"), Date.now());
+        save({ srcStats: st.srcStats });
         var allPts = mergePoints(historyPoints, p.points);
         mpData = C.multiPeriod(allPts);
         ctx3Data = C.threeDayContext(allPts, 3);
@@ -1837,6 +1874,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       .catch(function (e) {
         if (requested !== st.code) return;
         failStreak++;
+        C.bumpSrcHealth(st.srcStats, "fail", Date.now());
+        save({ srcStats: st.srcStats });
         if (!metrics) {
           $("px").textContent = "读取失败"; $("px").className = "px flat";
           $("chg").textContent = (e && e.message) || "网络错误"; $("chg").className = "chg";
@@ -2018,6 +2057,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     Object.keys(map).forEach(function (k) { $(map[k]).className = st.chartMode === k ? "on" : ""; });
   })();
   $("footVer").textContent = "版本 " + APP_VERSION;
+  st.srcStats = st.srcStats || { since: C.todayStr(), tencent: 0, eastmoney: 0, snapshot: 0, fail: 0, downMs: 0 };
+  $("footHealth").textContent = C.srcHealthText(st.srcStats);
   $("btnForce").addEventListener("click", function () {
     $("btnForce").textContent = "更新中…";
     try {
