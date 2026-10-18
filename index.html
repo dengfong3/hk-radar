@@ -685,6 +685,31 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     return bars;
   }
 
+
+    /**
+     * 行情源线路（同一厂商的多个等价域名，单独限流互不影响）。
+     * 实测 2026-10-18：腾讯 3 条、东财 3 条均返回 200 且 CORS *。
+     */
+    const TENCENT_MINUTE = [
+      "https://web.ifzq.gtimg.cn/appstock/app/minute/query",
+      "https://ifzq.gtimg.cn/appstock/app/minute/query",
+      "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/minute/query"
+    ];
+    const EASTMONEY_TRENDS = [
+      "https://push2his.eastmoney.com/api/qt/stock/trends2/get",
+      "https://push2.eastmoney.com/api/qt/stock/trends2/get",
+      "https://push2delay.eastmoney.com/api/qt/stock/trends2/get"
+    ];
+    function quoteUrls(code) {
+      const secid = eastmoneySecid(code);
+      return {
+        tencent: TENCENT_MINUTE.map((b) => b + "?code=" + encodeURIComponent(code)),
+        eastmoney: secid ? EASTMONEY_TRENDS.map((b) => b + "?secid=" + secid +
+          "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58&iscr=0&ndays=1") : [],
+        snapshot: ["https://qt.gtimg.cn/q=" + encodeURIComponent(code)]
+      };
+    }
+
     /** 按指定编码解字节（腾讯快照是 GBK；response.text() 固定按 UTF-8 解，会中文乱码） */
     function decodeText(buf, charset) {
       try {
@@ -1138,6 +1163,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     lotOf: lotOf, eastmoneySecid: eastmoneySecid, parseEastmoney: parseEastmoney, intradayRefs: intradayRefs,
     buildBars: buildBars, ema: ema, periodStats: periodStats, multiPeriod: multiPeriod,
     parseTencentSnapshot: parseTencentSnapshot, backoffDelay: backoffDelay, decodeText: decodeText,
+    quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
     phaseText: phaseText, pollDelay: pollDelay, aggregate5m: aggregate5m, shouldAlert: shouldAlert
   };
@@ -1730,50 +1756,56 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
   /* 行情抓取：主源腾讯分钟线 → 失败自动切东方财富（不同厂商，独立可用性） */
   var lastSource = "腾讯";
-  var srcSkip = { minute: 0, eastmoney: 0 };
+  var srcSkip = {};
   var SRC_COOLDOWN_MS = 5 * 60 * 1000;
+  function tryJson(url, parse) {
+    if (Date.now() < (srcSkip[url] || 0)) return Promise.resolve(null);
+    return fetch(url, { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) { srcSkip[url] = Date.now() + SRC_COOLDOWN_MS; return null; }
+        return r.json().then(function (json) {
+          var p = parse(json);
+          if (p && p.ok && p.points && p.points.length) return p;
+          srcSkip[url] = Date.now() + SRC_COOLDOWN_MS;
+          return null;
+        });
+      })
+      .catch(function () { srcSkip[url] = Date.now() + SRC_COOLDOWN_MS; return null; });
+  }
   function fetchQuote(code) {
-    var now = Date.now();
-    var p1 = Promise.resolve(null);
-    if (now > srcSkip.minute) {
-      p1 = fetch("https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=" + encodeURIComponent(code), { cache: "no-store" })
-        .then(function (r) { if (!r.ok) throw new Error("主源 HTTP " + r.status); return r.json(); })
-        .then(function (json) {
-          var p = C.parsePayload(json, code);
-          if (!p.ok || !p.points || !p.points.length) throw new Error(p.error || "主源无分时");
-          return p;
-        })
-        .catch(function () { srcSkip.minute = Date.now() + SRC_COOLDOWN_MS; return null; });
+    var urls = C.quoteUrls(code);
+    function step(list, i, parse) {
+      if (i >= list.length) return Promise.resolve(null);
+      return tryJson(list[i], parse).then(function (p) {
+        if (p) return p;
+        return step(list, i + 1, parse);
+      });
     }
-    return p1.then(function (p) {
-      if (p) return p;
-      var secid = C.eastmoneySecid(code);
-      var p2 = Promise.resolve(null);
-      if (secid && Date.now() > srcSkip.eastmoney) {
-        p2 = fetch("https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=" + secid +
-          "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58&iscr=0&ndays=1",
-          { cache: "no-store" })
-          .then(function (r) { if (!r.ok) throw new Error("备用源 HTTP " + r.status); return r.json(); })
-          .then(function (json) {
-            var p = C.parseEastmoney(json, code);
-            if (!p || !p.ok) throw new Error("备用源无数据");
-            return p;
+    return step(urls.tencent, 0, function (json) { return C.parsePayload(json, code); })
+      .then(function (p) {
+        if (p) return p;
+        return step(urls.eastmoney, 0, function (json) { return C.parseEastmoney(json, code); });
+      })
+      .then(function (p) {
+        if (p) return p;
+        // 3) 腾讯快照（GBK）
+        var u = urls.snapshot[0];
+        if (Date.now() < (srcSkip[u] || 0)) throw new Error("所有行情源暂不可用（可能被限流）");
+        return fetch(u, { cache: "no-store" })
+          .then(function (r) {
+            if (!r.ok) { srcSkip[u] = Date.now() + SRC_COOLDOWN_MS; throw new Error("快照源 HTTP " + r.status); }
+            return r.arrayBuffer();
           })
-          .catch(function () { srcSkip.eastmoney = Date.now() + SRC_COOLDOWN_MS; return null; });
-      }
-      return p2.then(function (p2r) {
-        if (p2r) return p2r;
-        // 3) 腾讯快照（只有报价）
-        return fetch("https://qt.gtimg.cn/q=" + encodeURIComponent(code), { cache: "no-store" })
-          .then(function (r) { if (!r.ok) throw new Error("快照源 HTTP " + r.status); return r.arrayBuffer(); })
           .then(function (buf) {
             var p3 = C.parseTencentSnapshot(C.decodeText(buf, "gbk"), code);
             if (!p3) throw new Error("快照解析失败");
             return p3;
           })
-          .catch(function () { throw new Error("所有行情源暂不可用（可能被限流）"); });
+          .catch(function (e) {
+            srcSkip[u] = Date.now() + SRC_COOLDOWN_MS;
+            throw new Error("所有行情源暂不可用（可能被限流）");
+          });
       });
-    });
   }
 
   /* ---------- 轮询 ---------- */

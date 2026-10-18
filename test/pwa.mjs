@@ -96,6 +96,15 @@ function makeHarness(seedStore, payloadFor, opts) {
   const fetchShim = async (url) => {
     const u = String(url);
     const o = opts || {};
+    if (o.hostFail) {
+      // 模拟某条线路被限流：命中 hostFail 的返回 501，其余正常返回腾讯报文
+      if (o.hostFail.some((h) => u.indexOf(h) >= 0)) {
+        return { ok: false, status: 501, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0), text: async () => "" };
+      }
+      const payload = payloadFor(o.codeFor || "sh603083");
+      if (!payload) return { ok: true, json: async () => ({ code: 0, data: {} }) };
+      return { ok: true, json: async () => payload };
+    }
     if (o.snapshotOnly) {
       if (u.indexOf("qt.gtimg.cn") >= 0) {
         return { ok: true, arrayBuffer: async () => o.snapshotBuffer, text: async () => "" };
@@ -354,6 +363,33 @@ ok("页面包含版本号常量", /APP_VERSION\s*=\s*"v[\d.]+/.test(html), (html
 ok("页脚有强制更新按钮", html.includes('id="btnForce"') && html.includes("强制更新"));
 ok("页脚显示版本（场景一）", /版本\s*v\d/.test(h1.txt("footVer")), h1.txt("footVer"));
 ok("强制更新按钮已注册点击", (h1.byId("btnForce").listeners.click || []).length > 0);
+
+
+/* ---------- 10) 多线路兜底 ---------- */
+console.log("\n[多线路兜底]");
+const uu = C.quoteUrls("hk06166");
+ok("PWA：腾讯 3 条 + 东财 3 条 + 快照 1 条",
+  uu.tencent.length === 3 && uu.eastmoney.length === 3 && uu.snapshot.length === 1,
+  [uu.tencent.length, uu.eastmoney.length, uu.snapshot.length]);
+ok("PWA：3 个不同域名", new Set(uu.tencent.map((u) => u.split("/")[2])).size === 3, uu.tencent.map((u) => u.split("/")[2]));
+ok("PWA：A股 secid 正确", C.quoteUrls("sh603083").eastmoney[0].indexOf("secid=1.603083") >= 0);
+ok("PWA：美股无东财线路", C.quoteUrls("usAAPL").eastmoney.length === 0);
+
+
+/* ---------- 11) 线路级故障切换：第一条被限流 → 自动用第二条 ---------- */
+console.log("\n[线路级故障切换]");
+const h4 = makeHarness(
+  { code: "sh603083", watch: ["sh603083"], sound: false, chartMode: "min",
+    pos: { sh603083: { shares: 100, cost: 175, realized: 0 } }, plans: {}, trade: {}, lastFired: {} },
+  (code) => (code === "sh603083" ? aSharePayload() : null),
+  { hostFail: ["web.ifzq.gtimg.cn"], codeFor: "sh603083" });
+let threw4 = null;
+try { h4.run(coreSrc); h4.run(uiSrc); } catch (e) { threw4 = e; }
+ok("线路切换场景：脚本无异常", !threw4, threw4 && threw4.message);
+await new Promise((r) => setTimeout(r, 400));
+ok("线路切换：主线路 501 时仍显示现价 168.51", h4.txt("px") === "168.51", h4.txt("px"));
+ok("线路切换：数据完整（均价 169.9）", h4.deep("grid").includes("169.90"), h4.deep("grid"));
+ok("线路切换：未误报警告条（不是快照模式）", h4.txt("snapHint") === "", h4.txt("snapHint"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

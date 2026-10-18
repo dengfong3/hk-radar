@@ -36,7 +36,7 @@ hk-radar-pwa/
   icon-192.png / icon-512.png   # 图标
   make_icons.py           # 重新生成图标的脚本（可选）
   preview-mobile.png      # 手机端渲染截图（390 宽）
-  test/pwa.mjs            # 自动化验证（104 项断言）
+  test/pwa.mjs            # 自动化验证（112 项断言）
   README.md               # 本文件
 ```
 
@@ -165,6 +165,32 @@ esponse.text() 固定按 UTF-8 解 → 中文名会变 �。
 - GitHub Pages 的 Cache-Control: max-age=600 → 浏览器最多缓存 10 分钟
 - Service Worker 对页面导航是**网络优先**：联网时永远先拉最新，只有断网才用缓存兜底
 - 所以：**发链接** → 家人刷新/重开就是最新；**发文件/压缩包** → 永远是那一份旧快照
+
+### 线路级兜底（v0.7）
+
+同一厂商有多个等价域名，已全部接入，共 **7 个端点**：
+
+| 厂商 | 线路 | 状态 |
+|:--|:--|:--|
+| 腾讯分钟线 | `web.ifzq.gtimg.cn` / `ifzq.gtimg.cn` / `proxy.finance.qq.com` | ✅ 3 条都通 |
+| 东财分时 | `push2his` / `push2` / `push2delay` | ✅ 3 条都通 |
+| 腾讯快照 | `qt.gtimg.cn`（GBK，只有报价） | ✅ |
+
+单条线路失败只冷却它自己（5 分钟），自动切下一条。
+
+> 实测（2026-10-18）：昨晚 `web.ifzq.gtimg.cn` 返回 501 时，`ifzq.gtimg.cn` 仍然可用——多线路能绕过单域名限流。
+
+### 为什么不能用同花顺/通达信
+
+| 源 | 原因 |
+|:--|:--|
+| 通达信 | 二进制 TCP 协议（7709），浏览器无法直连，只能后端 `pytdx` |
+| 同花顺 | 无 CORS、接口带 token 校验、反爬严格；猜的路径全 404 |
+| Yahoo | 403（需 crumb）+ 国内网络不稳 |
+| 新浪 | 需 Referer，浏览器伪造不了 |
+| 雪球 | 需 cookie token |
+
+**纯前端免费源到此为止；要更多源只能用后端代理。**
 
 ## 三点六、三源兜底与限流自保（v0.5）
 
@@ -312,7 +338,7 @@ git add -A; git commit -m "update"; git push
 
 ```powershell
 cd E:\12-1-good\hk-radar-pwa
-node test/pwa.mjs        # 104 项：静态合规检查 + 假 DOM 两个场景 + 计划编辑器 + 日内参考位 + 备用源
+node test/pwa.mjs        # 112 项：静态合规检查 + 假 DOM 两个场景 + 计划编辑器 + 日内参考位 + 备用源
 ```
 
 测试会检查：
