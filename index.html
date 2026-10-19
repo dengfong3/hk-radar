@@ -1530,13 +1530,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       return out;
     }
 
-    /** 观察池目标涨跌幅：主板 ±5%、双创 ±8%（ST 按 5% 限幅 → ±2.5%） */
+    /** 观察池涨跌幅上限：主板 |涨跌| < 5%、双创 < 8%（ST < 2.5%）——超过即剔除 */
     function poolTargetOf(code, name) {
       const nm = String(name || "");
       const limPct = nm.indexOf("ST") >= 0 ? 5 : limitPctOfCode(code) * 100;
-      const target = limPct >= 20 ? 8 : limPct >= 10 ? 5 : limPct * 0.5;
-      const band = limPct >= 20 ? 1.5 : 1.2;
-      return { limitPct: limPct, target, band };
+      const cap = limPct >= 20 ? 8 : limPct >= 10 ? 5 : limPct * 0.5;
+      return { limitPct: limPct, cap, target: cap, near: cap * 0.8 };
     }
 
     /**
@@ -1572,23 +1571,26 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         const tg = poolTargetOf(it.code, it.name);
         const reason = [], risk = [];
         let score = 0, skip = false, dev = null;
-        // 1) 收盘位置（只在上涨时加分；下跌不强求）
-        if (chg != null && chg >= 0) {
-          if (pos >= 0.85) { score += 5; reason.push("收在日内高位(" + Math.round(pos * 100) + "%)"); }
-          else if (pos >= 0.6) { score += 2; }
-          else risk.push("收盘回落(" + Math.round(pos * 100) + "%)");
-        }
-        // 2) 目标涨跌幅：排除涨停/跌停，主板 ±5%、双创 ±8%
+        // 1) 收盘位置（涨跌都看：收在日内高位 = 承接好）
+        if (pos >= 0.85) { score += 5; reason.push("收在日内高位(" + Math.round(pos * 100) + "%)"); }
+        else if (pos >= 0.6) { score += 2; }
+        else risk.push("收盘回落(" + Math.round(pos * 100) + "%)");
+        // 2) 涨跌幅上限：主板 |涨跌|<5%、双创<8%（ST<2.5%）；涨停/跌停与超上限都剔除
         if (chg != null) {
           const ab = Math.abs(chg);
           if (ab >= tg.limitPct * 0.98) {
-            skip = true;   // 涨停/跌停 → 直接剔除
+            skip = true;             // 涨停/跌停 → 剔除
+          } else if (ab >= tg.cap) {
+            skip = true;             // 超过上限（主板≥5%、双创≥8%）→ 剔除
           } else {
-            dev = Math.abs(ab - tg.target);
-            if (dev <= tg.band) { score += 6; reason.push((chg >= 0 ? "涨" : "跌") + ab.toFixed(1) + "%≈目标" + tg.target + "%"); }
-            else if (dev <= tg.band * 2) { score += 3; reason.push((chg >= 0 ? "涨" : "跌") + ab.toFixed(1) + "%(接近目标)"); }
-            else if (dev <= tg.band * 3) { score += 1; risk.push("偏离目标" + ab.toFixed(1) + "%"); }
-            else skip = true;   // 偏离目标太远 → 剔除
+            dev = Math.abs(tg.cap - ab);
+            if (ab >= 0.5 && ab <= tg.near) {
+              score += 4; reason.push((chg >= 0 ? "涨" : "跌") + ab.toFixed(1) + "%（上限" + tg.cap + "%内）");
+            } else if (ab > tg.near) {
+              score += 2; risk.push("接近上限" + tg.cap + "%");
+            } else {
+              score += 1; risk.push("波动过小(" + ab.toFixed(1) + "%)");
+            }
             if (chg < 0) reason.push("回调型");
           }
         }
@@ -1616,13 +1618,27 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         scored.push({ code: it.code, name: it.name, price, chgPct: chg, posInDay: pos,
           volRatio: vr, turnover: to, flowAmt: flow, flowPct: fp, industry: it.industry || "",
           score, dev, reasons: reason, risks: risk, lists: it.tags,
-          targetBand: tg.target, limitPct: tg.limitPct, dir: chg == null ? null : (chg >= 0 ? "up" : "down") });
+          capPct: tg.cap, targetBand: tg.cap, limitPct: tg.limitPct, dir: chg == null ? null : (chg >= 0 ? "up" : "down") });
       }
-      scored.sort((a, b) => b.score - a.score || (a.dev == null ? 99 : a.dev) - (b.dev == null ? 99 : b.dev) ||
-        (b.flowAmt || 0) - (a.flowAmt || 0));
-      out.picks = scored.slice(0, limit);
+      scored.sort((a, b) => b.score - a.score || (b.flowAmt || 0) - (a.flowAmt || 0) ||
+        Math.abs(b.chgPct || 0) - Math.abs(a.chgPct || 0));
+      // 板块配额：主板（10% 限幅）与双创（20% 限幅）各半，避免清一色双创；不足互补
+      if (opt && opt.mix === false) {
+        out.picks = scored.slice(0, limit);
+      } else {
+        const main = scored.filter((p) => p.limitPct === 10);
+        const gem = scored.filter((p) => p.limitPct !== 10);
+        const half = Math.ceil(limit / 2);
+        let picks = main.slice(0, half).concat(gem.slice(0, limit - Math.min(half, main.length)));
+        if (picks.length < limit) {
+          const rest = scored.filter((p) => picks.indexOf(p) < 0);
+          picks = picks.concat(rest.slice(0, limit - picks.length));
+        }
+        picks.sort((a, b) => b.score - a.score || (b.flowAmt || 0) - (a.flowAmt || 0));
+        out.picks = picks;
+      }
       out.ok = out.picks.length > 0;
-      out.note = "按今日收盘特征打分（目标涨跌幅 ±5%/±8%、量比、换手、主力资金）；已排除涨停/跌停。不是次日上涨预测。";
+      out.note = "按今日收盘特征打分：主板 |涨跌幅|<5%、双创<8%（涨跌都可），已排除涨停/跌停；再看量比/换手/主力资金。不是次日上涨预测。";
       return out;
     }
 
@@ -2149,7 +2165,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.16 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.17 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2329,7 +2345,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         html += '<div class="washrow"><span class="lw">' + (idx + 1) + ". " + p.name + "</span><span>" + p.code +
           " · " + chgTxt + " · 量比" + (p.volRatio == null ? "--" : p.volRatio.toFixed(1)) +
           " · 换手" + (p.turnover == null ? "--" : p.turnover.toFixed(1)) + "% · 主力" + (p.flowAmt == null ? "--" : (p.flowAmt / 1e8).toFixed(2) + "亿") +
-          " · 分" + (p.score == null ? "--" : p.score) + (p.targetBand == null ? "" : " · 目标±" + p.targetBand + "%") +
+          " · 分" + (p.score == null ? "--" : p.score) + (p.targetBand == null ? "" : " · 上限±" + p.targetBand + "%") +
           (tags ? " · " + tags : "") + (riskTxt ? '<span class="ld">' + riskTxt + "</span>" : "") + "</span></div>";
       });
       html += '<div><button class="ledclear" id="btnPoolRefresh">重新生成</button></div>';

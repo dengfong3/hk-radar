@@ -717,7 +717,8 @@ const ranked = C.rankPoolCandidates(lists, { limit: 10 });
 ok("观察池：涨停被剔除、偏离目标过远也剔除", ranked.ok && ranked.picks.length === 3, ranked.picks.length);
 ok("观察池：按分数降序", ranked.picks.every((p, i, arr) => i === 0 || arr[i - 1].score >= p.score), ranked.picks.map((p) => p.score));
 const first = ranked.picks[0];
-ok("观察池：资金王排第一（主力净流入+温和上涨+收盘高位）", first.code === "sh600487", first.code + " " + first.score);
+ok("观察池：+5.0% 主板超上限被剔除，300502 排第一", first.code === "sz300502", first.code + " " + first.score);
+ok("观察池：超上限（主板≥5%）不进池", !ranked.picks.some((p) => p.code === "sh600487"), ranked.picks.map((p) => [p.code, p.chgPct]));
 ok("观察池：涨停股被直接剔除", !ranked.picks.some((p) => p.code === "sz301119"), ranked.picks.map((p) => p.code));
 ok("观察池：目标区间随板块（主板5/创业8）", ranked.picks.every((p) => p.targetBand === 5 || p.targetBand === 8), ranked.picks.map((p) => [p.code, p.targetBand]));
 ok("观察池：主力净流出带风险标注", ranked.picks.some((p) => p.code === "sh600825" && p.risks.some((r) => r.indexOf("净流出") >= 0)));
@@ -738,11 +739,14 @@ ok("目标：ST 股 2.5%", C.poolTargetOf("sh600xxx", "*ST某某").target === 2.
 // 跌停/涨停剔除 + 跌幅入选
 const mkP = (code, name, chg, price, hi, lo, vr, to, flow, fp) => ({ code, name, price, chgPct: chg, high: hi, low: lo, volRatio: vr, turnover: to, flowAmt: flow, flowPct: fp });
 const edge = C.rankPoolCandidates({
-  up: [mkP("sh600001", "涨停股", 10.0, 20, 20, 18, 2, 5, 1e8, 8), mkP("sh600002", "跌停股", -10.0, 16, 18, 16, 2, 5, 1e8, 8)],
-  down: [mkP("sh600003", "回调股", -5.0, 19, 21, 18.5, 1.8, 4, 8e7, 7)]
+  up: [mkP("sh600001", "涨停股", 10.0, 20, 20, 18, 2, 5, 1e8, 8), mkP("sh600002", "跌停股", -10.0, 16, 18, 16, 2, 5, 1e8, 8),
+       mkP("sh600004", "超上限", 5.1, 20, 20.5, 19, 2, 5, 1e8, 8)],
+  down: [mkP("sh600003", "回调股", -4.5, 19, 21, 18.5, 1.8, 4, 8e7, 7)]
 }, { limit: 10 });
-ok("剔除：涨停/跌停都不进池", edge.picks.length === 1 && edge.picks[0].code === "sh600003", edge.picks.map((p) => p.code));
-ok("跌幅 -5%：标记为回调型", edge.picks[0].dir === "down" && edge.picks[0].reasons.some((r) => r.indexOf("回调型") >= 0), edge.picks[0].reasons);
+ok("剔除：涨停/跌停/超上限都不进池", edge.picks.length === 1 && edge.picks[0].code === "sh600003", edge.picks.map((p) => p.code));
+ok("双创 +7.9% 在 8% 上限内可入选", (function () { const r = C.rankPoolCandidates({ up: [mkP("sz300001", "双创内", 7.9, 20, 20.2, 18, 2, 5, 9e7, 8)] }, { limit: 5 }); return r.picks.length === 1 && r.picks[0].capPct === 8; })());
+ok("双创 +8.1% 超上限被剔除", C.rankPoolCandidates({ up: [mkP("sz300002", "双创超", 8.1, 20, 20.2, 18, 2, 5, 9e7, 8)] }, { limit: 5 }).picks.length === 0);
+ok("跌幅 -4.5%：标记为回调型", edge.picks[0].dir === "down" && edge.picks[0].reasons.some((r) => r.indexOf("回调型") >= 0), edge.picks[0].reasons);
 
 const batch = 'v_sh600487="1~\u8d44\u91d1\u738b~600487~22.00~21.00~21.50~1.0~0~0~21.99~100~21.98~100~0~0~0~0~0~0~22.01~100~22.02~100~0~0~0~0~0~0~20261019150000~1.00~5.00~22.20~20.50~22.00/1/2~1~2~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0";\nv_sz300502="1~\u8d44\u91d1\u6b21~300502~94.00~95.00~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0";';
 const quotes = C.parseBatchSnapshot(batch);
