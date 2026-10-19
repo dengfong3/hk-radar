@@ -695,5 +695,41 @@ ok("集成：委比/大盘 RS 进入理由", spBook.reasons.some((r) => r.indexO
 
 ok("页面含日线/盘口/大盘卡片", html.includes("macroBox") && html.includes("日线 / 盘口 / 大盘"));
 
+
+/* ---------- 18) 14:57 尾盘观察池（今日特征，非预测） ---------- */
+console.log("\n[尾盘观察池]");
+ok("导出观察池函数", !!(C.poolWindow && C.rankPoolCandidates && C.parseBatchSnapshot && C.poolHitStats));
+const pwin = C.poolWindow(new Date(2026, 9, 19, 14, 57, 0));
+ok("时间窗口：14:57 在窗口内", pwin.inWindow === true, pwin);
+ok("时间窗口：10:00 不在窗口内", C.poolWindow(new Date(2026, 9, 19, 10, 0, 0)).inWindow === false);
+
+const mk = (code, name, price, chg, hi, lo, vr, to, flow, fp) => ({ code, name, price, chgPct: chg, high: hi, low: lo, volRatio: vr, turnover: to, flowAmt: flow, flowPct: fp });
+const lists = {
+  up: [mk("sz301119", "A股一号", 34.31, 20.01, 34.31, 26.86, 1.37, 6.47, 36709191, 15.57)],
+  vr: [mk("sz002889", "量比王", 12.0, 4.0, 12.1, 11.0, 11.45, 20.45, 28223738, 3.1)],
+  turn: [mk("sh600825", "换手王", 8.0, 1.85, 8.5, 7.6, 10.98, 25.26, -1374617184, -8.0)],
+  flow: [
+    mk("sh600487", "资金王", 22.0, 5.0, 22.2, 20.5, 2.0, 8.18, 1968815728, 12.0),
+    mk("sz300502", "资金次", 95.0, 3.0, 96.0, 92.0, 1.5, 2.59, 841737536, 9.0)
+  ]
+};
+const ranked = C.rankPoolCandidates(lists, { limit: 10 });
+ok("观察池：返回候选且数量不超过上限", ranked.ok && ranked.picks.length === 5, ranked.picks.length);
+ok("观察池：按分数降序", ranked.picks.every((p, i, arr) => i === 0 || arr[i - 1].score >= p.score), ranked.picks.map((p) => p.score));
+const first = ranked.picks[0];
+ok("观察池：资金王排第一（主力净流入+温和上涨+收盘高位）", first.code === "sh600487", first.code + " " + first.score);
+ok("观察池：涨停股带风险标注", ranked.picks.some((p) => p.code === "sz301119" && p.risks.some((r) => r.indexOf("涨停") >= 0)), ranked.picks.map((p) => [p.code, p.risks]));
+ok("观察池：主力净流出带风险标注", ranked.picks.some((p) => p.code === "sh600825" && p.risks.some((r) => r.indexOf("净流出") >= 0)));
+ok("观察池：空数据 → ok=false", C.rankPoolCandidates({}, {}).ok === false);
+
+const batch = 'v_sh600487="1~\u8d44\u91d1\u738b~600487~22.00~21.00~21.50~1.0~0~0~21.99~100~21.98~100~0~0~0~0~0~0~22.01~100~22.02~100~0~0~0~0~0~0~20261019150000~1.00~5.00~22.20~20.50~22.00/1/2~1~2~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0";\nv_sz300502="1~\u8d44\u91d1\u6b21~300502~94.00~95.00~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0";';
+const quotes = C.parseBatchSnapshot(batch);
+ok("批量快照：解析出 2 只", Object.keys(quotes).length === 2, Object.keys(quotes));
+ok("批量快照：涨跌计算（21→22 = +4.76%）", Math.abs(quotes.sh600487.chgPct - 4.7619) < 0.01, quotes.sh600487.chgPct);
+const recs = [{ code: "600487", fullCode: "sh600487", name: "资金王" }, { code: "300502", fullCode: "sz300502", name: "资金次" }];
+const hits = C.poolHitStats(recs, quotes);
+ok("命中统计：1 涨 1 跌 → 命中率 50%", hits.n === 2 && Math.abs(hits.hitRate - 50) < 1e-9 && hits.up === 1 && hits.down === 1, hits);
+ok("页面含观察池卡片", html.includes("poolBox") && html.includes("尾盘观察池"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -259,6 +259,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 </div>
 
 <div class="card">
+  <div class="card-title"><b>14:57 尾盘观察池</b><span class="sp"></span><span id="poolMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="poolBox"></div>
+</div>
+
+<div class="card">
   <div class="card-title"><b>智能信号</b><span class="sp"></span><span id="sigMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="sigBox"></div>
 </div>
@@ -1484,6 +1489,134 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       return out;
     }
 
+
+    /* ================= 尾盘观察池（今日特征筛选，不是次日预测） ================= */
+
+    /** 观察池时间窗口：A 股 14:50–15:00（本地时间） */
+    function poolWindow(now) {
+      const d = now || new Date();
+      const mins = d.getHours() * 60 + d.getMinutes();
+      return { inWindow: mins >= 14 * 60 + 50 && mins <= 15 * 60 + 5, mins };
+    }
+
+    /** A 股涨跌停幅度（仅用于观察池风险标注） */
+    function limitPctOfCode(code) {
+      const c = String(code).toLowerCase();
+      const digits = c.replace(/^(sh|sz|bj)/, "");
+      if (c.indexOf("bj") === 0 || /^(4|8)/.test(digits)) return 0.30;
+      if (/^(30|68)/.test(digits)) return 0.20;
+      return 0.10;
+    }
+
+    /**
+     * 从「榜单数据」筛候选并按今日可观测特征打分（0–30）。
+     * 明确：这是"今天收盘时呈现出这些特征"的排序，不是"明天会涨"的预测。
+     * lists: { up, turn, flow, vr }——每项为 { code, name, price, chgPct, high, low, volRatio, turnover, flowAmt, flowPct, industry }
+     */
+    function rankPoolCandidates(lists, opt) {
+      const out = { ok: false, pool: 0, picks: [], note: "" };
+      const byCode = {};
+      const add = (arr, tag) => {
+        for (const it of arr || []) {
+          if (!it || !it.code) continue;
+          if (!byCode[it.code]) byCode[it.code] = Object.assign({ tags: [] }, it);
+          else Object.assign(byCode[it.code], it);
+          if (tag && byCode[it.code].tags.indexOf(tag) < 0) byCode[it.code].tags.push(tag);
+        }
+      };
+      add(lists && lists.up, "涨幅榜");
+      add(lists && lists.turn, "换手榜");
+      add(lists && lists.flow, "资金榜");
+      add(lists && lists.vr, "量比榜");
+      const all = Object.keys(byCode).map((k) => byCode[k]);
+      out.pool = all.length;
+      if (!all.length) return out;
+      const limit = (opt && opt.limit) || 10;
+      const scored = [];
+      for (const it of all) {
+        const price = num(it.price), high = num(it.high), low = num(it.low), chg = num(it.chgPct);
+        if (!(price > 0) || !(high > low)) continue;
+        const pos = (price - low) / (high - low);
+        const limPct = limitPctOfCode(it.code) * 100;
+        const reason = [], risk = [];
+        let score = 0;
+        // 1) 收盘位置（接近当日最高强度高）
+        if (pos >= 0.85) { score += 5; reason.push("收在日内高位(" + Math.round(pos * 100) + "%)"); }
+        else if (pos >= 0.6) { score += 2; }
+        else risk.push("收盘回落(" + Math.round(pos * 100) + "%)");
+        // 2) 涨幅区间：2%–7% 最佳；涨停降权
+        if (chg != null) {
+          if (chg >= limPct * 0.98) { score -= 2; risk.push("已涨停(次日溢价不确定)"); }
+          else if (chg >= 2 && chg <= 7) { score += 3; reason.push("温和上涨" + chg.toFixed(1) + "%"); }
+          else if (chg > 7) { score -= 1; risk.push("涨幅偏大(追高风险)"); }
+          else if (chg < 2) risk.push("动量不足(" + chg.toFixed(1) + "%)");
+        }
+        // 3) 量比：1.2–3 健康；>5 过热
+        const vr = num(it.volRatio);
+        if (vr != null) {
+          if (vr >= 1.2 && vr <= 3) { score += 3; reason.push("量比" + vr.toFixed(1) + "(健康)"); }
+          else if (vr > 5) { score -= 2; risk.push("量比过热" + vr.toFixed(1)); }
+          else if (vr < 1) risk.push("量能不足");
+        }
+        // 4) 换手：2%–10% 健康；>15% 过热
+        const to = num(it.turnover);
+        if (to != null) {
+          if (to >= 2 && to <= 10) { score += 2; reason.push("换手" + to.toFixed(1) + "%"); }
+          else if (to > 15) { score -= 3; risk.push("换手过热" + to.toFixed(1) + "%"); }
+        }
+        // 5) 主力资金
+        const flow = num(it.flowAmt), fp = num(it.flowPct);
+        if (flow != null) {
+          if (flow > 0 && (fp == null || fp >= 5)) { score += 4; reason.push("主力净流入" + (flow / 1e8).toFixed(2) + "亿"); }
+          else if (flow > 0) { score += 1; reason.push("主力小幅流入"); }
+          else { score -= 3; risk.push("主力净流出"); }
+        }
+        scored.push({ code: it.code, name: it.name, price, chgPct: chg, posInDay: pos,
+          volRatio: vr, turnover: to, flowAmt: flow, flowPct: fp, industry: it.industry || "",
+          score, reasons: reason, risks: risk, lists: it.tags });
+      }
+      scored.sort((a, b) => b.score - a.score || (b.flowAmt || 0) - (a.flowAmt || 0));
+      out.picks = scored.slice(0, limit);
+      out.ok = out.picks.length > 0;
+      out.note = "按今日收盘特征打分（收盘位置/涨幅/量比/换手/主力资金），不是次日上涨预测。";
+      return out;
+    }
+
+    /** 解析腾讯批量快照（用于次日回填验证）：返回 { code: {name, price, prevClose, chgPct} } */
+    function parseBatchSnapshot(text) {
+      const res = {};
+      const re = /v_([a-zA-Z0-9]+)="([^"]*)"/g;
+      let m;
+      while ((m = re.exec(String(text || "")))) {
+        const q = m[2].split("~");
+        if (q.length < 5) continue;
+        const price = num(q[3]), prev = num(q[4]);
+        if (!(price > 0)) continue;
+        res[m[1]] = { name: q[1], price, prevClose: prev,
+          chgPct: prev > 0 ? (price / prev - 1) * 100 : null };
+      }
+      return res;
+    }
+
+    /** 观察池命中统计：{ n, up, down, flat, avgPct, hitRate, rows } */
+    function poolHitStats(records, quotes) {
+      const out = { n: 0, up: 0, down: 0, flat: 0, avgPct: null, hitRate: null, rows: [] };
+      for (const r of records || []) {
+        const q = quotes && quotes[r.fullCode];
+        if (!q || q.chgPct == null) continue;
+        out.n++;
+        if (q.chgPct > 0.05) out.up++;
+        else if (q.chgPct < -0.05) out.down++;
+        else out.flat++;
+        out.rows.push({ code: r.code, name: r.name, chgPct: q.chgPct });
+      }
+      if (out.n) {
+        out.avgPct = out.rows.reduce((s, x) => s + x.chgPct, 0) / out.n;
+        out.hitRate = out.up / out.n * 100;
+      }
+      return out;
+    }
+
 /**
      * 按持仓比例分配「减仓/加仓」股数（不再一律 1 手）。
      * 减仓：近→远 25% / 35% / 剩余，整手向下取，至少 1 手；
@@ -1931,6 +2064,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     limitPctOf: limitPctOf, limitStateOf: limitStateOf,
     washoutDetect: washoutDetect,
     parseTencentKline: parseTencentKline, dailyTrend: dailyTrend, atrCalc: atrCalc, orderBookStats: orderBookStats,
+    poolWindow: poolWindow, rankPoolCandidates: rankPoolCandidates, parseBatchSnapshot: parseBatchSnapshot, poolHitStats: poolHitStats, limitPctOfCode: limitPctOfCode,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
@@ -1946,7 +2080,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.12 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.13 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2102,6 +2236,52 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     box.innerHTML = html;
     var meta = $("macroMeta");
     if (meta) meta.textContent = "大周期与强度";
+  }
+
+  function renderPoolCard() {
+    var box = $("poolBox"), meta = $("poolMeta");
+    if (!box) return;
+    var today = todayKey();
+    var pools = st.pools || [];
+    var mine = null;
+    for (var i = pools.length - 1; i >= 0; i--) if (pools[i].date === today) { mine = pools[i]; break; }
+    var html = "";
+    if (!mine) {
+      html += '<div class="sigwhy">14:50 后自动生成；也可以现在手动生成（用当前榜单数据）。</div>';
+      html += '<div><button class="ledclear" id="btnPoolGen">立即生成今日观察池</button></div>';
+    } else {
+      html += '<div class="sigwhy">' + mine.date + " 收盘特征筛选 · " + mine.picks.length + " 只 · 榜单 " +
+        (mine.listsOk == null ? "--" : mine.listsOk + "/4") + " 可用</div>";
+      mine.picks.forEach(function (p, idx) {
+        var tags = p.reasons.slice(0, 2).join(" · ");
+        var riskTxt = p.risks.length ? " ⚠ " + p.risks.slice(0, 2).join(" · ") : "";
+        html += '<div class="washrow"><span class="lw">' + (idx + 1) + ". " + p.name + "</span><span>" + p.code +
+          " · " + (p.chgPct >= 0 ? "+" : "") + p.chgPct.toFixed(2) + "% · 量比" + (p.volRatio == null ? "--" : p.volRatio.toFixed(1)) +
+          " · 换手" + (p.turnover == null ? "--" : p.turnover.toFixed(1)) + "% · 主力" + (p.flowAmt == null ? "--" : (p.flowAmt / 1e8).toFixed(2) + "亿") +
+          " · 分" + p.score + (tags ? " · " + tags : "") + (riskTxt ? '<span class="ld">' + riskTxt + "</span>" : "") + "</span></div>";
+      });
+      html += '<div><button class="ledclear" id="btnPoolRefresh">重新生成</button></div>';
+    }
+    // 次日验证
+    var verified = pools.filter(function (p) { return p.verify && p.verify.stats && p.verify.stats.n; });
+    if (verified.length) {
+      var last = verified[verified.length - 1];
+      html += '<div class="washsum unclear">次日验证（' + last.date + "）：" + last.verify.stats.up + "/" + last.verify.stats.n +
+        " 上涨 · 平均 " + (last.verify.stats.avgPct >= 0 ? "+" : "") + last.verify.stats.avgPct.toFixed(2) + "%</div>";
+      var all = poolStatsAll();
+      if (all && all.days > 1) {
+        html += '<div class="sigwhy">累计 ' + all.days + " 天：" + all.up + "/" + all.n + " 上涨 · 命中率 " + all.hitRate.toFixed(1) +
+          "% · 平均 " + (all.avg >= 0 ? "+" : "") + all.avg.toFixed(2) + "%</div>";
+      }
+    } else {
+      html += '<div class="sigwhy">次日验证：次日打开时会自动用开盘价回填昨日名单涨跌，累计几天后看命中率。</div>';
+    }
+    html += '<div class="sigwhy" style="font-size:10.5px">这是「今日收盘特征」的排序，<b>不是明日上涨预测</b>；次日结果会自动回填，用数据判断有效性。不构成投资建议。</div>';
+    box.innerHTML = html;
+    var b1 = $("btnPoolGen"), b2 = $("btnPoolRefresh");
+    if (b1) b1.addEventListener("click", function () { buildPool(); });
+    if (b2) b2.addEventListener("click", function () { buildPool(); });
+    if (meta) meta.textContent = mine ? "今日已生成" : "未生成";
   }
 
   function renderSignalCard() {
@@ -2727,6 +2907,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   /* 3 天历史（多周期 K 线与 3 日背景用；慢速拉取，失败降级为仅今日） */
   var historyPoints = null, historyAt = 0, historyCode = "", mpData = null, ctx3Data = null;
   var dailyData = null, dailyAt = 0, dailyCode = "", orderData = null, orderAt = 0, indexData = null, indexAt = 0;
+  var poolBuilding = false, poolAutoDate = "";
   var failStreak = 0;
   function allPointsNow() {
     return mergePoints(historyPoints, parsed ? parsed.points : []);
@@ -2850,6 +3031,116 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       });
   }
 
+  /* ---------- 14:57 尾盘观察池（今日特征，不是次日预测） ---------- */
+  var RANK_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23";
+  var RANK_FIELDS = "f2,f3,f5,f6,f8,f10,f12,f13,f14,f15,f16,f17,f18,f23,f62,f100,f184";
+  function fetchRank(fid, pz) {
+    var url = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=" + (pz || 50) +
+      "&po=1&np=1&fltt=2&invt=2&fid=" + fid + "&fs=" + RANK_FS + "&fields=" + RANK_FIELDS;
+    return fetch(url, { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("榜单 HTTP " + r.status); return r.json(); })
+      .then(function (j) {
+        var rows = (j && j.data && j.data.diff) || [];
+        return rows.map(function (x) {
+          return { code: (x.f13 === 1 ? "sh" : "sz") + String(x.f12), name: x.f14,
+            price: x.f2, chgPct: x.f3, high: x.f15, low: x.f16,
+            volRatio: x.f10, turnover: x.f8, flowAmt: x.f62, flowPct: x.f184, industry: x.f100 };
+        });
+      });
+  }
+  function todayKey() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function rankOnce(fid, pz) {
+    // 单个榜单：最多重试 2 次，失败返回 null（不阻塞其他榜单）
+    var attempt = 0;
+    var tryOnce = function () {
+      attempt++;
+      return fetchRank(fid, pz).catch(function (e) {
+        if (attempt >= 2) return null;
+        return new Promise(function (res) { setTimeout(res, 1200); }).then(tryOnce);
+      });
+    };
+    return tryOnce();
+  }
+  function buildPool() {
+    if (poolBuilding) return;
+    poolBuilding = true;
+    var meta = $("poolMeta"); if (meta) meta.textContent = "生成中…";
+    var lists = {}, okCount = 0;
+    var defs = [["up", "f3"], ["vr", "f10"], ["turn", "f8"], ["flow", "f62"]];
+    var i = 0;
+    var next = function () {
+      if (i >= defs.length) {
+        if (okCount < 2) {
+          var box = $("poolBox");
+          if (box) box.innerHTML = '<div class="sigwhy">榜单接口暂不可用（' + okCount + '/4），稍后点「重新生成」</div>';
+          poolBuilding = false;
+          return;
+        }
+        var ranked = C.rankPoolCandidates(lists, { limit: 10 });
+        if (!ranked.ok) {
+          var box2 = $("poolBox");
+          if (box2) box2.innerHTML = '<div class="sigwhy">榜单无有效数据</div>';
+          poolBuilding = false;
+          return;
+        }
+        st.pools = st.pools || [];
+        var today = todayKey();
+        st.pools = st.pools.filter(function (p) { return p.date !== today; });
+        st.pools.push({ date: today, genAt: Date.now(), picks: ranked.picks, listsOk: okCount });
+        if (st.pools.length > 10) st.pools = st.pools.slice(-10);
+        save({ pools: st.pools });
+        poolAutoDate = today;
+        poolBuilding = false;
+        renderPoolCard();
+        return;
+      }
+      var def = defs[i++];
+      rankOnce(def[1], 40).then(function (arr) {
+        if (arr && arr.length) { lists[def[0]] = arr; okCount++; }
+        setTimeout(next, 700);   // 顺序请求，避免并发触发限流
+      });
+    };
+    next();
+  }
+  function verifyPools() {
+    var today = todayKey();
+    var pend = (st.pools || []).filter(function (p) { return p.date < today && !p.verify; });
+    if (!pend.length) return;
+    for (var i = 0; i < pend.length; i++) {
+      (function (pool) {
+        var codes = pool.picks.map(function (p) { return p.code; }).join(",");
+        fetch("https://qt.gtimg.cn/q=" + codes, { cache: "no-store" })
+          .then(function (r) { return r.arrayBuffer(); })
+          .then(function (buf) {
+            var quotes = C.parseBatchSnapshot(C.decodeText(buf, "gbk"));
+            var stats = C.poolHitStats(pool.picks, quotes);
+            if (!stats.n) return;
+            pool.verify = { at: Date.now(), stats: stats };
+            save({ pools: st.pools });
+            renderPoolCard();
+          })
+          .catch(function () {});
+      })(pend[i]);
+    }
+  }
+  function poolStatsAll() {
+    var all = { n: 0, up: 0, avg: 0, days: 0 };
+    (st.pools || []).forEach(function (p) {
+      if (!p.verify || !p.verify.stats || !p.verify.stats.n) return;
+      all.days++;
+      all.n += p.verify.stats.n;
+      all.up += p.verify.stats.up;
+      all.avg += p.verify.stats.avgPct * p.verify.stats.n;
+    });
+    if (!all.n) return null;
+    all.avg /= all.n;
+    all.hitRate = all.up / all.n * 100;
+    return all;
+  }
+
   /* ---------- 轮询 ---------- */
   function tick(manual) {
     if (inflight) return;
@@ -2872,6 +3163,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         }
         if (Date.now() - indexAt > 60000) {
           fetchIndex(st.code).then(function (ix) { indexData = ix; indexAt = Date.now(); }).catch(function () {});
+        }
+        // 14:57 尾盘观察池：到点自动生成一次（A 股）
+        if (C.marketOf(st.code) === "cn") {
+          var pw = C.poolWindow(new Date());
+          if (pw.inWindow && poolAutoDate !== todayKey() && !poolBuilding) buildPool();
+          verifyPools();
         }
         if (C.marketOf(st.code) === "cn" && Date.now() - orderAt > 8000) {
           orderAt = Date.now();
@@ -3092,6 +3389,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   $("footVer").textContent = "版本 " + APP_VERSION;
   st.srcStats = st.srcStats || { since: C.todayStr(), tencent: 0, eastmoney: 0, snapshot: 0, fail: 0, downMs: 0 };
   $("footHealth").textContent = C.srcHealthText(st.srcStats);
+  try { verifyPools(); renderPoolCard(); } catch (e) {}
   $("btnForce").addEventListener("click", function () {
     $("btnForce").textContent = "更新中…";
     try {
