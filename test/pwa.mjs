@@ -731,5 +731,33 @@ const hits = C.poolHitStats(recs, quotes);
 ok("命中统计：1 涨 1 跌 → 命中率 50%", hits.n === 2 && Math.abs(hits.hitRate - 50) < 1e-9 && hits.up === 1 && hits.down === 1, hits);
 ok("页面含观察池卡片", html.includes("poolBox") && html.includes("尾盘观察池"));
 
+
+/* ---------- 19) 观察池历史列表 ---------- */
+console.log("\n[观察池历史列表]");
+ok("导出 poolHistoryLines", typeof C.poolHistoryLines === "function");
+const histPools = [
+  { date: "2026-10-17", picks: [{ code: "sh600183", name: "生益科技", chgPct: 2.64, volRatio: 1.2, turnover: 2.4, flowAmt: 645000000, score: 14, reasons: ["温和上涨"], risks: [] }, { code: "sh600522", name: "中天科技", chgPct: 5.41, volRatio: 1.6, turnover: 4.8, flowAmt: 445000000, score: 14, reasons: ["主力净流入"], risks: [] }],
+    verify: { stats: { n: 2, up: 1, down: 1, avgPct: 0.5, hitRate: 50, rows: [{ code: "sh600183", name: "生益科技", chgPct: 2.1 }, { code: "sh600522", name: "中天科技", chgPct: -1.1 }] } } },
+  { date: "2026-10-19", picks: [{ code: "sh603019", name: "中科曙光", chgPct: 4.94, volRatio: 1.5, turnover: 2.8, flowAmt: 174000000, score: 17, reasons: ["收在日内高位"], risks: [] }] }
+];
+const histLines = C.poolHistoryLines(histPools, 10);
+ok("历史：2 天且按日期倒序", histLines.length === 2 && histLines[0].date === "2026-10-19", histLines.map((x) => x.date));
+ok("历史：已验证行含次日统计", histLines[1].verified && histLines[1].text.indexOf("次日 1/2 上涨") >= 0 && histLines[1].text.indexOf("+0.50%") >= 0, histLines[1].text);
+ok("历史：已验证行含个股明细", histLines[1].per.indexOf("生益科技 +2.1%") >= 0, histLines[1].per);
+ok("历史：待验证行标注", histLines[0].verified === false && histLines[0].text.indexOf("待次日验证") >= 0, histLines[0].text);
+ok("页面含清空历史按钮", html.includes("btnPoolClear") && html.includes("观察池历史"));
+
+// 渲染：带历史的池子
+const h5 = makeHarness(
+  { code: "sh600418", watch: ["sh600418"], sound: false, chartMode: "min", pos: {}, plans: {}, trade: {}, lastFired: {},
+    ledger: { records: [] }, pools: histPools },
+  () => null, { snapshotOnly: false });
+let threw5 = null;
+try { h5.run(coreSrc); h5.run(uiSrc); } catch (e) { threw5 = e; }
+ok("渲染：历史场景无异常", !threw5, threw5 && threw5.message);
+await new Promise((r) => setTimeout(r, 200));
+ok("渲染：出现『观察池历史』", h5.deep("poolBox").indexOf("观察池历史") >= 0, h5.deep("poolBox").slice(0, 120));
+ok("渲染：历史含次日统计文案", h5.deep("poolBox").indexOf("次日 1/2 上涨") >= 0, h5.deep("poolBox").slice(0, 300));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

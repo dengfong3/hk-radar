@@ -1598,6 +1598,28 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       return res;
     }
 
+
+    /** 观察池历史（按日期倒序），返回可直接渲染的行 */
+    function poolHistoryLines(pools, limit) {
+      const list = (pools || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, limit || 10);
+      const out = [];
+      for (const p of list) {
+        const v = p.verify && p.verify.stats;
+        const mmdd = String(p.date || "").slice(5).replace("-", "/");
+        const rec = { date: p.date, mmdd, n: (p.picks || []).length, per: "", verified: false, text: "" };
+        if (v && v.n) {
+          rec.verified = true;
+          rec.text = mmdd + " · " + rec.n + " 只 · 次日 " + v.up + "/" + v.n + " 上涨 · 平均 " +
+            (v.avgPct >= 0 ? "+" : "") + v.avgPct.toFixed(2) + "%";
+          rec.per = (v.rows || []).slice(0, 6).map((r) => r.name + (r.chgPct >= 0 ? " +" : " ") + r.chgPct.toFixed(1) + "%").join(" · ");
+        } else {
+          rec.text = mmdd + " · " + rec.n + " 只 · 待次日验证";
+        }
+        out.push(rec);
+      }
+      return out;
+    }
+
     /** 观察池命中统计：{ n, up, down, flat, avgPct, hitRate, rows } */
     function poolHitStats(records, quotes) {
       const out = { n: 0, up: 0, down: 0, flat: 0, avgPct: null, hitRate: null, rows: [] };
@@ -2065,6 +2087,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     washoutDetect: washoutDetect,
     parseTencentKline: parseTencentKline, dailyTrend: dailyTrend, atrCalc: atrCalc, orderBookStats: orderBookStats,
     poolWindow: poolWindow, rankPoolCandidates: rankPoolCandidates, parseBatchSnapshot: parseBatchSnapshot, poolHitStats: poolHitStats, limitPctOfCode: limitPctOfCode,
+    poolHistoryLines: poolHistoryLines,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
@@ -2080,7 +2103,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.13 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.14 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2253,12 +2276,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       html += '<div class="sigwhy">' + mine.date + " 收盘特征筛选 · " + mine.picks.length + " 只 · 榜单 " +
         (mine.listsOk == null ? "--" : mine.listsOk + "/4") + " 可用</div>";
       mine.picks.forEach(function (p, idx) {
-        var tags = p.reasons.slice(0, 2).join(" · ");
-        var riskTxt = p.risks.length ? " ⚠ " + p.risks.slice(0, 2).join(" · ") : "";
+        var tags = (p.reasons || []).slice(0, 2).join(" · ");
+        var riskTxt = (p.risks || []).length ? " ⚠ " + (p.risks || []).slice(0, 2).join(" · ") : "";
+        var chgTxt = p.chgPct == null ? "--" : (p.chgPct >= 0 ? "+" : "") + p.chgPct.toFixed(2) + "%";
         html += '<div class="washrow"><span class="lw">' + (idx + 1) + ". " + p.name + "</span><span>" + p.code +
-          " · " + (p.chgPct >= 0 ? "+" : "") + p.chgPct.toFixed(2) + "% · 量比" + (p.volRatio == null ? "--" : p.volRatio.toFixed(1)) +
+          " · " + chgTxt + " · 量比" + (p.volRatio == null ? "--" : p.volRatio.toFixed(1)) +
           " · 换手" + (p.turnover == null ? "--" : p.turnover.toFixed(1)) + "% · 主力" + (p.flowAmt == null ? "--" : (p.flowAmt / 1e8).toFixed(2) + "亿") +
-          " · 分" + p.score + (tags ? " · " + tags : "") + (riskTxt ? '<span class="ld">' + riskTxt + "</span>" : "") + "</span></div>";
+          " · 分" + (p.score == null ? "--" : p.score) + (tags ? " · " + tags : "") + (riskTxt ? '<span class="ld">' + riskTxt + "</span>" : "") + "</span></div>";
       });
       html += '<div><button class="ledclear" id="btnPoolRefresh">重新生成</button></div>';
     }
@@ -2276,11 +2300,31 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     } else {
       html += '<div class="sigwhy">次日验证：次日打开时会自动用开盘价回填昨日名单涨跌，累计几天后看命中率。</div>';
     }
+    // 观察池历史列表（最近 10 天，含次日结果）
+    try {
+      var hist = C.poolHistoryLines(st.pools || [], 10);
+      if (hist.length) {
+        html += '<div class="sigwhy" style="margin-top:6px"><b>观察池历史</b>（最近 ' + hist.length + ' 天）</div>';
+        for (var hi = 0; hi < hist.length; hi++) {
+          var it = hist[hi];
+          var body = it.text.replace(/^\S+ · /, "");
+          html += '<div class="washrow"><span class="' + (it.verified ? "lw" : "ln") + '">' + it.mmdd + '</span><span>' + body + "</span></div>";
+          if (it.per) html += '<div class="sigwhy" style="padding-left:92px">' + it.per + "</div>";
+        }
+        html += '<div><button class="ledclear" id="btnPoolClear">清空历史</button></div>';
+      }
+    } catch (e) { /* 历史渲染失败不影响主卡 */ }
     html += '<div class="sigwhy" style="font-size:10.5px">这是「今日收盘特征」的排序，<b>不是明日上涨预测</b>；次日结果会自动回填，用数据判断有效性。不构成投资建议。</div>';
     box.innerHTML = html;
-    var b1 = $("btnPoolGen"), b2 = $("btnPoolRefresh");
+    var b1 = $("btnPoolGen"), b2 = $("btnPoolRefresh"), b3 = $("btnPoolClear");
     if (b1) b1.addEventListener("click", function () { buildPool(); });
     if (b2) b2.addEventListener("click", function () { buildPool(); });
+    if (b3) b3.addEventListener("click", function () {
+      if (!confirm("清空全部观察池历史（含次日验证统计）？")) return;
+      st.pools = [];
+      save({ pools: st.pools });
+      renderPoolCard();
+    });
     if (meta) meta.textContent = mine ? "今日已生成" : "未生成";
   }
 
