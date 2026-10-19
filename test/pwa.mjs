@@ -557,5 +557,31 @@ ok("页面含信号台账卡片", html.includes("ledgerBox") && html.includes("�
 ok("渲染：智能信号有内容", h1.deep("sigBox").length > 10, h1.deep("sigBox").slice(0, 60));
 ok("渲染：台账有内容", h1.deep("ledgerBox").length > 5, h1.deep("ledgerBox").slice(0, 60));
 
+
+/* ---------- 15) 涨跌停显式规则 ---------- */
+console.log("\n[涨跌停规则]");
+ok("涨停幅度：主板 10%", C.limitPctOf("sh600519") === 0.10, C.limitPctOf("sh600519"));
+ok("涨停幅度：创业板 20%", C.limitPctOf("sz300750") === 0.20, C.limitPctOf("sz300750"));
+ok("涨停幅度：科创板 20%", C.limitPctOf("sh688981") === 0.20, C.limitPctOf("sh688981"));
+ok("涨停幅度：北交所 30%", C.limitPctOf("bj835185") === 0.30, C.limitPctOf("bj835185"));
+ok("涨停幅度：港股/美股无涨跌停", C.limitPctOf("hk06166") === null && C.limitPctOf("usAAPL") === null);
+
+const limUp = C.limitStateOf({ price: 67.22, prevClose: 61.11 }, "sz003021");
+ok("封板判定：67.22 = 61.11×1.1 → 涨停", limUp && limUp.atUp && limUp.up === 67.22, limUp);
+const limDown = C.limitStateOf({ price: 55.0, prevClose: 61.11 }, "sz003021");
+ok("封板判定：55.00 = 61.11×0.9 → 跌停", limDown && limDown.atDown && limDown.down === 55.0, limDown);
+ok("封板判定：未封板", C.limitStateOf({ price: 64.0, prevClose: 61.11 }, "sz003021").atUp === false);
+
+// 用 003021 的真实行情结构跑一遍：涨停 + 强多头证据 → 仍然拒绝
+const limPts = synth(1, 193, 0.04);
+const limMp = C.multiPeriod(limPts);
+const limM = { price: 67.22, prevClose: 61.11, high: 67.22, low: 59.52, vwap: 63.54, vwapDevPct: 5.79, volRatio: 0.26 };
+const limRefs = C.intradayRefs(limM, limPts, { shares: 0, cost: 0 }, { code: "sz003021", plan: null });
+const limMp2 = { valid: 4, score: 4, bias: "强多", keyRes: [68.5, 69.5], keySup: [64.4, 63.5], byPeriod: {} };
+const limSp = C.scoreSetup(limM, limMp2, null, limRefs, { shares: 0, cost: 0 }, null, { code: "sz003021", points: limPts });
+ok("涨停 + 多头：等级 = 不交易", limSp.grade === "noTrade", limSp.grade);
+ok("涨停：否决原因出现『当日无上行空间』", limSp.vetoes.some((v) => v.indexOf("当日无上行空间") >= 0), limSp.vetoes);
+ok("涨停：限价信息随信号返回", limSp.limit && limSp.limit.atUp === true, limSp.limit);
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

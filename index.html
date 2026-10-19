@@ -878,6 +878,27 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
     
     /* ================= 指标：MACD(12,26,9) / KDJ(9,3,3) / 量价状态 ================= */
+
+    /** A 股涨跌停幅度（港股/美股没有涨跌停 → null） */
+    function limitPctOf(code) {
+      const mk = marketOf(code);
+      if (mk !== "cn") return null;
+      const c = String(code).toLowerCase();
+      const digits = c.replace(/^(sh|sz|bj)/, "");
+      if (c.indexOf("bj") === 0 || /^(4|8)/.test(digits)) return 0.30;   // 北交所
+      if (/^(30|68)/.test(digits)) return 0.20;                          // 创业板 / 科创板
+      return 0.10;                                                       // 沪深主板
+    }
+
+    /** 当前是否封在涨停/跌停附近（判断当日还有没有空间） */
+    function limitStateOf(m, code) {
+      const pct = limitPctOf(code);
+      if (pct == null || !m || !(m.prevClose > 0) || !(m.price > 0)) return null;
+      const up = Math.round(m.prevClose * (1 + pct) * 100) / 100;
+      const down = Math.round(m.prevClose * (1 - pct) * 100) / 100;
+      return { pct, up, down, atUp: m.price >= up * 0.995, atDown: m.price <= down * 1.005 };
+    }
+
     function macdCalc(closes, opt) {
       if (!closes || closes.length < 35) return null;
       const fast = (opt && opt.fast) || 12, slow = (opt && opt.slow) || 26, sig = (opt && opt.signal) || 9;
@@ -1032,6 +1053,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       const dir = bull - bear;
       out.side = dir > 0.8 ? "long" : dir < -0.8 ? "reduce" : "none";
       out.score = Math.max(0, Math.min(100, Math.round(50 + dir * 3.5)));
+      // 涨跌停封板：当日顺势方向没有空间 → 明确否决（持筹者仍可减仓）
+      out.limit = limitStateOf(m, code);
+      if (out.limit) {
+        const limTxt = (out.limit.atUp ? "涨停 " : "跌停 ") + (out.limit.atUp ? out.limit.up : out.limit.down).toFixed(2) +
+          "（" + (out.limit.atUp ? "+" : "-") + Math.round(out.limit.pct * 100) + "%）";
+        R.push(limTxt);
+        // 涨停：只要不是在建议减仓，就不该追；跌停：只要不是在建议持有/买入，就不该杀跌
+        if (out.limit.atUp && out.side !== "reduce") V.push(limTxt + "：当日无上行空间，不追");
+        if (out.limit.atDown && out.side !== "long") V.push(limTxt + "：当日无下行空间，不杀跌");
+      }
       // 触发区间 / 止损 / 目标
       const refsReduce = (refs && refs.reduce) || [];
       const refsAdd = (refs && refs.add) || [];
@@ -1587,6 +1618,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     suggestQtys: suggestQtys, suggestPlan: suggestPlan,
     macdCalc: macdCalc, kdjCalc: kdjCalc, volumeState: volumeState, regimeOf: regimeOf,
     scoreSetup: scoreSetup, ledgerAdd: ledgerAdd, ledgerEval: ledgerEval, ledgerStats: ledgerStats,
+    limitPctOf: limitPctOf, limitStateOf: limitStateOf,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
@@ -1602,7 +1634,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.9 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.10 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -1720,7 +1752,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var gTxt = sp.grade === "noTrade" ? "不交易" : sp.grade + " 级";
     var html = "";
     html += '<div class="sighead"><span class="siggrade ' + g + '">' + gTxt + '</span>' +
-      '<span class="sigscore">' + sp.score + "/100 · " + sideTxt + "</span></div>";
+      '<span class="sigscore">' + sp.score + "/100 · " + sideTxt + "</span>";
+    if (sp.limit && (sp.limit.atUp || sp.limit.atDown)) {
+      html += '<span class="siggrade ' + (sp.limit.atUp ? "A" : "C") + '">' +
+        (sp.limit.atUp ? "涨停 " + sp.limit.up.toFixed(2) : "跌停 " + sp.limit.down.toFixed(2)) + "</span>";
+    }
+    html += "</div>";
     if (sp.grade === "noTrade") {
       var vs = sp.vetoes.length ? sp.vetoes : ["条件不足"];
       html += '<div class="sigveto">不交易原因：' + vs.join("；") + "</div>";
