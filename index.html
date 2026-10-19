@@ -1508,6 +1508,28 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       return 0.10;
     }
 
+
+    /** 新浪榜单解析（备用源：东财被限流时用；字段有限，无量比/主力净流入） */
+    function parseSinaRank(text) {
+      let arr;
+      try { arr = JSON.parse(String(text || "")); } catch (e) { return []; }
+      if (!Array.isArray(arr)) return [];
+      const out = [];
+      for (const x of arr) {
+        if (!x || !x.symbol) continue;
+        const price = parseFloat(x.trade);
+        if (!(price > 0)) continue;
+        out.push({
+          code: String(x.symbol), name: x.name || "",
+          price, chgPct: parseFloat(x.changepercent),
+          high: parseFloat(x.high), low: parseFloat(x.low),
+          volRatio: null, turnover: parseFloat(x.turnoverratio),
+          flowAmt: null, flowPct: null, industry: ""
+        });
+      }
+      return out;
+    }
+
     /** 观察池目标涨跌幅：主板 ±5%、双创 ±8%（ST 按 5% 限幅 → ±2.5%） */
     function poolTargetOf(code, name) {
       const nm = String(name || "");
@@ -1549,7 +1571,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         const pos = (price - low) / (high - low);
         const tg = poolTargetOf(it.code, it.name);
         const reason = [], risk = [];
-        let score = 0, skip = false;
+        let score = 0, skip = false, dev = null;
         // 1) 收盘位置（只在上涨时加分；下跌不强求）
         if (chg != null && chg >= 0) {
           if (pos >= 0.85) { score += 5; reason.push("收在日内高位(" + Math.round(pos * 100) + "%)"); }
@@ -1562,11 +1584,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           if (ab >= tg.limitPct * 0.98) {
             skip = true;   // 涨停/跌停 → 直接剔除
           } else {
-            const dev = Math.abs(ab - tg.target);
+            dev = Math.abs(ab - tg.target);
             if (dev <= tg.band) { score += 6; reason.push((chg >= 0 ? "涨" : "跌") + ab.toFixed(1) + "%≈目标" + tg.target + "%"); }
             else if (dev <= tg.band * 2) { score += 3; reason.push((chg >= 0 ? "涨" : "跌") + ab.toFixed(1) + "%(接近目标)"); }
             else if (dev <= tg.band * 3) { score += 1; risk.push("偏离目标" + ab.toFixed(1) + "%"); }
-            else risk.push("涨跌幅偏离过大(" + chg.toFixed(1) + "%)");
+            else skip = true;   // 偏离目标太远 → 剔除
             if (chg < 0) reason.push("回调型");
           }
         }
@@ -1593,10 +1615,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         if (skip) continue;
         scored.push({ code: it.code, name: it.name, price, chgPct: chg, posInDay: pos,
           volRatio: vr, turnover: to, flowAmt: flow, flowPct: fp, industry: it.industry || "",
-          score, reasons: reason, risks: risk, lists: it.tags,
+          score, dev, reasons: reason, risks: risk, lists: it.tags,
           targetBand: tg.target, limitPct: tg.limitPct, dir: chg == null ? null : (chg >= 0 ? "up" : "down") });
       }
-      scored.sort((a, b) => b.score - a.score || (b.flowAmt || 0) - (a.flowAmt || 0));
+      scored.sort((a, b) => b.score - a.score || (a.dev == null ? 99 : a.dev) - (b.dev == null ? 99 : b.dev) ||
+        (b.flowAmt || 0) - (a.flowAmt || 0));
       out.picks = scored.slice(0, limit);
       out.ok = out.picks.length > 0;
       out.note = "按今日收盘特征打分（目标涨跌幅 ±5%/±8%、量比、换手、主力资金）；已排除涨停/跌停。不是次日上涨预测。";
@@ -2110,6 +2133,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     poolWindow: poolWindow, rankPoolCandidates: rankPoolCandidates, parseBatchSnapshot: parseBatchSnapshot, poolHitStats: poolHitStats, limitPctOfCode: limitPctOfCode,
     poolHistoryLines: poolHistoryLines,
     poolTargetOf: poolTargetOf,
+    parseSinaRank: parseSinaRank,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
@@ -2125,7 +2149,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.15 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.16 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2296,7 +2320,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       html += '<div><button class="ledclear" id="btnPoolGen">立即生成今日观察池</button></div>';
     } else {
       html += '<div class="sigwhy">' + mine.date + " 收盘特征筛选 · " + mine.picks.length + " 只 · 榜单 " +
-        (mine.listsOk == null ? "--" : mine.listsOk + "/4") + " 可用</div>";
+        (mine.listsOk == null ? "--" : mine.listsOk + "/" + (mine.listsTotal || 5)) + " 可用" +
+        (mine.source === "sina" ? "（备用源：新浪）" : "") + "</div>";
       mine.picks.forEach(function (p, idx) {
         var tags = (p.reasons || []).slice(0, 2).join(" · ");
         var riskTxt = (p.risks || []).length ? " ⚠ " + (p.risks || []).slice(0, 2).join(" · ") : "";
@@ -2974,7 +2999,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   /* 3 天历史（多周期 K 线与 3 日背景用；慢速拉取，失败降级为仅今日） */
   var historyPoints = null, historyAt = 0, historyCode = "", mpData = null, ctx3Data = null;
   var dailyData = null, dailyAt = 0, dailyCode = "", orderData = null, orderAt = 0, indexData = null, indexAt = 0;
-  var poolBuilding = false, poolAutoDate = "";
+  var poolBuilding = false, poolAutoDate = "", poolRetryCount = 0;
   var failStreak = 0;
   function allPointsNow() {
     return mergePoints(historyPoints, parsed ? parsed.points : []);
@@ -3142,19 +3167,49 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     };
     return tryOnce();
   }
+  function fetchRankSina(kind) {
+    // 备用榜单（东财限流时）：up/down 抓 3 页（覆盖 ±5% 区间），turn/amount 抓 1 页
+    var map = { up: "sort=changepercent&asc=0", down: "sort=changepercent&asc=1",
+      turn: "sort=turnoverratio&asc=0", amount: "sort=amount&asc=0" };
+    var pages = (kind === "up" || kind === "down") ? [1, 2, 3] : [1];
+    var acc = [], pi = 0;
+    var nextPage = function () {
+      if (pi >= pages.length) {
+        if (!acc.length) return Promise.reject(new Error("新浪榜单无数据"));
+        return Promise.resolve(acc);
+      }
+      var page = pages[pi++];
+      var url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=" + page +
+        "&num=100&node=hs_a&" + (map[kind] || map.up) + "&callback=cb";
+      return fetch(url, { cache: "no-store" })
+        .then(function (r) { if (!r.ok) throw new Error("新浪榜单 HTTP " + r.status); return r.text(); })
+        .then(function (txt) {
+          var arr = C.parseSinaRank(txt);
+          if (arr.length) acc = acc.concat(arr);
+          return new Promise(function (res) { setTimeout(res, 400); }).then(nextPage);
+        })
+        .catch(function () { return nextPage(); });
+    };
+    return nextPage();
+  }
+
   function buildPool() {
     if (poolBuilding) return;
     poolBuilding = true;
     var meta = $("poolMeta"); if (meta) meta.textContent = "生成中…";
-    var lists = {}, okCount = 0;
+    var lists = {}, okCount = 0, sinaUsed = false;
     var defs = [["up", "f3", 1], ["down", "f3", 0], ["vr", "f10", 1], ["turn", "f8", 1], ["flow", "f62", 1]];
     var i = 0;
     var next = function () {
       if (i >= defs.length) {
         if (okCount < 2) {
           var box = $("poolBox");
-          if (box) box.innerHTML = '<div class="sigwhy">榜单接口暂不可用（' + okCount + '/4），稍后点「重新生成」</div>';
+          if (box) box.innerHTML = '<div class="sigwhy">榜单接口暂不可用（' + okCount + "/" + defs.length + '），90 秒后自动重试，或点「重新生成」</div>';
           poolBuilding = false;
+          if ((poolRetryCount || 0) < 2) {
+            poolRetryCount = (poolRetryCount || 0) + 1;
+            setTimeout(function () { if (!poolBuilding) buildPool(); }, 90000);
+          }
           return;
         }
         var ranked = C.rankPoolCandidates(lists, { limit: 10 });
@@ -3167,7 +3222,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         st.pools = st.pools || [];
         var today = todayKey();
         st.pools = st.pools.filter(function (p) { return p.date !== today; });
-        st.pools.push({ date: today, genAt: Date.now(), picks: ranked.picks, listsOk: okCount });
+        st.pools.push({ date: today, genAt: Date.now(), picks: ranked.picks, listsOk: okCount,
+          listsTotal: defs.length, source: sinaUsed ? "sina" : "em" });
         if (st.pools.length > 10) st.pools = st.pools.slice(-10);
         save({ pools: st.pools });
         poolAutoDate = today;
@@ -3176,9 +3232,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         return;
       }
       var def = defs[i++];
-      rankOnce(def[1], 40, def[2]).then(function (arr) {
-        if (arr && arr.length) { lists[def[0]] = arr; okCount++; }
-        setTimeout(next, 700);   // 顺序请求，避免并发触发限流
+      var kmap = { up: "up", down: "down", turn: "turn", vr: "amount", flow: "amount" };
+      rankOnce(def[1], 60, def[2]).then(function (arr) {
+        if (arr && arr.length) { lists[def[0]] = arr; okCount++; setTimeout(next, 500); return; }
+        // 东财失败 → 用新浪备用
+        fetchRankSina(kmap[def[0]] || "up").then(function (arr2) {
+          if (arr2 && arr2.length) { lists[def[0]] = arr2; okCount++; sinaUsed = true; }
+          setTimeout(next, 500);
+        }).catch(function () { setTimeout(next, 500); });
       });
     };
     next();

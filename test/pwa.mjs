@@ -714,7 +714,7 @@ const lists = {
   ]
 };
 const ranked = C.rankPoolCandidates(lists, { limit: 10 });
-ok("观察池：返回候选且数量不超过上限（涨停股被剔除）", ranked.ok && ranked.picks.length === 4, ranked.picks.length);
+ok("观察池：涨停被剔除、偏离目标过远也剔除", ranked.ok && ranked.picks.length === 3, ranked.picks.length);
 ok("观察池：按分数降序", ranked.picks.every((p, i, arr) => i === 0 || arr[i - 1].score >= p.score), ranked.picks.map((p) => p.score));
 const first = ranked.picks[0];
 ok("观察池：资金王排第一（主力净流入+温和上涨+收盘高位）", first.code === "sh600487", first.code + " " + first.score);
@@ -722,6 +722,12 @@ ok("观察池：涨停股被直接剔除", !ranked.picks.some((p) => p.code === 
 ok("观察池：目标区间随板块（主板5/创业8）", ranked.picks.every((p) => p.targetBand === 5 || p.targetBand === 8), ranked.picks.map((p) => [p.code, p.targetBand]));
 ok("观察池：主力净流出带风险标注", ranked.picks.some((p) => p.code === "sh600825" && p.risks.some((r) => r.indexOf("净流出") >= 0)));
 ok("观察池：空数据 → ok=false", C.rankPoolCandidates({}, {}).ok === false);
+ok("新浪榜单解析", (function () {
+  const txt = JSON.stringify([{ symbol: "sz301119", code: "301119", name: "正强股份", trade: "34.310", changepercent: 20.01, high: "34.310", low: "26.860", turnoverratio: 6.47 },
+    { symbol: "sh600183", code: "600183", name: "生益科技", trade: "42.10", changepercent: 5.12, high: "42.50", low: "39.80", turnoverratio: 3.2 }]);
+  const r = C.parseSinaRank(txt);
+  return r.length === 2 && r[1].code === "sh600183" && Math.abs(r[1].chgPct - 5.12) < 1e-9 && r[1].volRatio === null;
+})());
 
 // 目标涨跌幅：主板 ±5%、双创 ±8%、ST ±2.5%
 ok("目标：主板 5%", C.poolTargetOf("sh600519", "贵州茅台").target === 5, C.poolTargetOf("sh600519", "贵州茅台"));
