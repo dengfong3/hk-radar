@@ -286,19 +286,27 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 <div class="mask" id="mask"></div>
 <div class="sheet" id="sheet">
   <h3>编辑交易计划：<span id="mCode">—</span></h3>
-  <div class="sub">填你<b>自己</b>的价位；留空的档位不会生效。<b>本工具不提供建议价位。</b></div>
+  <div class="sub">可手动填价位，也可点 <b>⚡ 生成建议</b> 按当前走势把参考位填进来，再自行修改后保存。<b>建议只是机械参考，最终由你确认。</b></div>
   <div class="frow"><div><label>减仓1 下沿</label><input id="fT1lo" inputmode="decimal" type="number" step="0.01" placeholder="如 92"></div>
     <div><label>减仓1 上沿</label><input id="fT1hi" inputmode="decimal" type="number" step="0.01" placeholder="如 97"></div></div>
   <div class="frow"><div><label>减仓2 下沿</label><input id="fT2lo" inputmode="decimal" type="number" step="0.01"></div>
     <div><label>减仓2 上沿</label><input id="fT2hi" inputmode="decimal" type="number" step="0.01"></div></div>
   <div class="frow"><div><label>减仓3 下沿</label><input id="fT3lo" inputmode="decimal" type="number" step="0.01"></div>
     <div><label>减仓3 上沿</label><input id="fT3hi" inputmode="decimal" type="number" step="0.01"></div></div>
+  <div class="frow"><div><label>加仓1 下沿</label><input id="fB1lo" inputmode="decimal" type="number" step="0.01"></div>
+    <div><label>加仓1 上沿</label><input id="fB1hi" inputmode="decimal" type="number" step="0.01"></div></div>
+  <div class="frow"><div><label>加仓2 下沿</label><input id="fB2lo" inputmode="decimal" type="number" step="0.01"></div>
+    <div><label>加仓2 上沿</label><input id="fB2hi" inputmode="decimal" type="number" step="0.01"></div></div>
   <div class="frow"><div><label>预警线（减半）</label><input id="fRwarn" inputmode="decimal" type="number" step="0.01"></div>
     <div><label>危险线（清仓）</label><input id="fRdanger" inputmode="decimal" type="number" step="0.01"></div></div>
   <div class="frow"><div><label>仓位上限（股）</label><input id="fMax" inputmode="numeric" type="number" step="100" placeholder="如 200"></div>
     <div><label>亏损预算（本币）</label><input id="fBudget" inputmode="decimal" type="number" step="10" placeholder="如 5000"></div></div>
   <div class="frow"><div><label>硬止损下限（可选）</label><input id="fFloor" inputmode="decimal" type="number" step="0.01" placeholder="不许下移的地板价"></div>
     <div><label>均价偏离阈值 %</label><input id="fBand" inputmode="decimal" type="number" step="0.1" placeholder="1.5"></div></div>
+  <div class="fbtns">
+    <button id="btnPlanSuggest">⚡ 按当前分析生成建议（可再改）</button>
+  </div>
+  <div class="sub" id="planSuggestTip" style="margin:-2px 0 8px"></div>
   <div class="fbtns">
     <button id="btnPlanSave" class="primary">保存计划</button>
     <button id="btnPlanClear">清除计划</button>
@@ -838,6 +846,89 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         high: hi, low: lo, turnover: cumAmt > 0 ? cumAmt : null,
         pe: null, amplitude: null, high52: null, low52: null, lotSize: null } };
   }
+
+    /**
+     * 按持仓比例分配「减仓/加仓」股数（不再一律 1 手）。
+     * 减仓：近→远 25% / 35% / 剩余，整手向下取，至少 1 手；
+     * 加仓：优先用「仓位上限 − 现持仓」的容量，50% / 30% / 剩余，整手。
+     */
+    function suggestQtys(pos, plan, refs, code) {
+      const lot = lotOf(code);
+      const shares = pos && pos.shares > 0 ? pos.shares : 0;
+      const reduce = ((refs && refs.reduce) || []).map((r) => Object.assign({}, r));
+      const add = ((refs && refs.add) || []).map((r) => Object.assign({}, r));
+      let left = shares;
+      for (let i = 0; i < reduce.length; i++) {
+        let q = 0;
+        if (left > 0) {
+          if (i === reduce.length - 1) q = left;
+          else {
+            const pct = i === 0 ? 0.25 : 0.35;
+            const want = Math.floor((shares * pct) / lot) * lot;
+            q = want >= lot ? Math.min(want, left) : lot;
+          }
+          if (q > left) q = left;
+          if (q < lot) q = 0;
+          left -= q;
+        }
+        reduce[i].qty = q;
+      }
+      let capacity = 0;
+      if (plan && plan.maxShares > 0) capacity = Math.max(0, plan.maxShares - shares);
+      else capacity = shares > 0 ? Math.floor((shares * 0.5) / lot) * lot : lot;
+      let addLeft = capacity;
+      const w = [0.5, 0.3, 0.2];
+      for (let i = 0; i < add.length; i++) {
+        let q = 0;
+        if (addLeft >= lot) {
+          if (i === add.length - 1) q = addLeft;
+          else {
+            const want = Math.floor((capacity * w[i]) / lot) * lot;
+            q = want >= lot ? Math.min(want, addLeft) : lot;
+          }
+          if (q > addLeft) q = addLeft;
+          if (q < lot) q = 0;
+          addLeft -= q;
+        }
+        add[i].qty = q;
+      }
+      return { reduce, add };
+    }
+
+    /**
+     * 按当前分析生成一份「建议交易计划」（减仓档 + 加仓档 + 止损线 + 仓位上限）。
+     * 只是把机械参考位整理成计划格式，用户可在编辑器里改，最终仍由用户保存。
+     */
+    function suggestPlan(m, refs, mp, ctx3, pos, code) {
+      const lot = lotOf(code);
+      const price = m && m.price > 0 ? m.price : null;
+      const out = { takes: [], buys: [], reds: [], maxShares: null,
+        lossBudget: defaultBudgetFor(code), hardStopFloor: null, vwapBand: 1.5,
+        roundTripCostPct: 1.2, levels: [], suggested: true };
+      if (!price || !refs || !refs.ok) return out;
+      const r2 = (x) => Math.round(x * 100) / 100;
+      const zone = (p) => ({ lo: r2(p * 0.995), hi: r2(p * 1.005) });
+      (refs.reduce || []).slice(0, 3).forEach((r, i) => {
+        const z = zone(r.price);
+        out.takes.push({ id: "T" + (i + 1), lo: z.lo, hi: z.hi,
+          short: i === 2 ? "清剩余" : "减 " + (i + 1) + " 档",
+          label: r.why + " · 建议减 " + (r.qty > 0 ? r.qty + " 股" : "观察") });
+      });
+      (refs.add || []).slice(0, 2).forEach((r, i) => {
+        const z = zone(r.price);
+        out.buys.push({ id: "B" + (i + 1), lo: z.lo, hi: z.hi, shares: r.qty || 0,
+          label: r.why + " · 建议加 " + (r.qty > 0 ? r.qty + " 股" : "观察") });
+      });
+      const sups = ((mp && mp.keySup) || []).filter((x) => x > 0 && x < price * 0.985).sort((a, b) => b - a);
+      const base = sups.length ? sups[0] : (refs.add && refs.add.length ? refs.add[refs.add.length - 1].price : price * 0.95);
+      const stop = r2(Math.min(base * 0.99, price * 0.99));
+      out.reds.push({ id: "R1", at: stop, dir: "below", level: "warn", short: "止损",
+        label: "跌破 " + stop + "：按计划止损" });
+      out.maxShares = Math.max(lot, Math.floor(principalFor(code) / price / lot) * lot);
+      out.levels = out.takes.map((t) => t.lo).concat(out.buys.map((b) => b.hi)).concat(out.reds.map((r) => r.at));
+      return out;
+    }
+
   /* 日内机械参考位：当天分钟数据推出的减仓/加仓参考价（可解释、非预测、非建议） */
   function intradayRefs(m, points, pos, opts) {
     var code = (opts && opts.code) || DEFAULT_CODE;
@@ -929,11 +1020,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       var distPct = (cc.price / price - 1) * 100;
       var item = { price: cc.price, why: cc.why, tags: cc.tags, distPct: distPct, conf: confOf(cc) };
       if (distPct >= 0.3 && distPct <= 9) {
-        item.qty = shares > 0 ? Math.min(lot, shares) : 0;
         item.aboveCost = cost > 0 ? cc.price > cost : null;
         refs.reduce.push(item);
       } else if (distPct <= -0.3 && distPct >= -9 && cc.price > stopFloor) {
-        item.qty = shares <= 0 ? lot : (plan && plan.maxShares && shares >= plan.maxShares ? 0 : lot);
         item.aboveCost = cost > 0 ? cc.price > cost : null;
         refs.add.push(item);
       }
@@ -942,6 +1031,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     refs.add.sort(function (a, b) { return b.price - a.price; });
     refs.reduce = refs.reduce.slice(0, 3);
     refs.add = refs.add.slice(0, 3);
+    const qs = suggestQtys(pos, plan, refs, code);
+    refs.reduce = qs.reduce;
+    refs.add = qs.add;
     refs.stopFloor = stopFloor === -Infinity ? null : stopFloor;
     if (volTag) refs.notes.push("分钟量能：" + volTag + (volRatio !== null && volRatio !== undefined ? "（" + volRatio.toFixed(2) + "×）" : ""));
     if (m.vwapDevPct !== null && m.vwapDevPct !== undefined) {
@@ -1196,6 +1288,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     lotOf: lotOf, eastmoneySecid: eastmoneySecid, parseEastmoney: parseEastmoney, intradayRefs: intradayRefs,
     buildBars: buildBars, ema: ema, periodStats: periodStats, multiPeriod: multiPeriod,
     parseTencentSnapshot: parseTencentSnapshot, backoffDelay: backoffDelay, decodeText: decodeText,
+    suggestQtys: suggestQtys, suggestPlan: suggestPlan,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
@@ -1211,7 +1304,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.7 · 2026-10-18";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.8 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -1322,7 +1415,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   /* ---------- 计划 / 自选 ---------- */
   function planFromForm() {
     var v = function (id) { var x = parseFloat($(id).value); return isFinite(x) ? x : null; };
-    var takes = [], reds = [];
+    var takes = [], reds = [], buys = [];
     var pairs = [[v("fT1lo"), v("fT1hi"), "减 1 手"], [v("fT2lo"), v("fT2hi"), "再减 1 手"], [v("fT3lo"), v("fT3hi"), "清剩余"]];
     pairs.forEach(function (p, i) {
       if (p[0] == null && p[1] == null) return;
@@ -1330,22 +1423,34 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (lo > hi) { var t = lo; lo = hi; hi = t; }
       takes.push({ id: "T" + (i + 1), lo: lo, hi: hi, short: p[2], label: p[2] + "区" });
     });
+    var maxS0 = v("fMax");
+    var cap0 = maxS0 && maxS0 > 0 ? Math.max(0, maxS0 - (curPos().shares || 0)) : 0;
+    var bpairs = [[v("fB1lo"), v("fB1hi"), 0.5], [v("fB2lo"), v("fB2hi"), 0.3]];
+    bpairs.forEach(function (p, i) {
+      if (p[0] == null && p[1] == null) return;
+      var lo = p[0] != null ? p[0] : p[1], hi = p[1] != null ? p[1] : p[0];
+      if (lo > hi) { var t = lo; lo = hi; hi = t; }
+      var lot = C.lotOf(st.code);
+      var q = cap0 > 0 ? Math.max(lot, Math.floor(cap0 * p[2] / lot) * lot) : lot;
+      buys.push({ id: "B" + (i + 1), lo: lo, hi: hi, shares: q, label: "加仓" + (i + 1) + "区" });
+    });
     if (v("fRwarn") != null) reds.push({ id: "R1", at: v("fRwarn"), dir: "below", level: "warn", short: "减半", label: "跌破 " + v("fRwarn") + "：按计划减半" });
     if (v("fRdanger") != null) reds.push({ id: "R2", at: v("fRdanger"), dir: "below", level: "danger", short: "清仓", label: "跌破 " + v("fRdanger") + "：清仓离场" });
     var plan = {
-      takes: takes, reds: reds, buys: [],
+      takes: takes, reds: reds, buys: buys,
       maxShares: v("fMax"), lossBudget: v("fBudget"), hardStopFloor: v("fFloor"),
       vwapBand: v("fBand") || 1.5, roundTripCostPct: 1.2,
       levels: [v("fRwarn"), v("fRdanger")].filter(function (x) { return x != null; }),
       updatedAt: new Date().toISOString()
     };
-    if (!takes.length && !reds.length && plan.maxShares == null && plan.lossBudget == null && plan.hardStopFloor == null) return null;
+    if (!takes.length && !reds.length && !buys.length && plan.maxShares == null && plan.lossBudget == null && plan.hardStopFloor == null) return null;
     return plan;
   }
   function planToForm(p) {
-    ["fT1lo", "fT1hi", "fT2lo", "fT2hi", "fT3lo", "fT3hi", "fRwarn", "fRdanger", "fMax", "fBudget", "fFloor", "fBand"].forEach(function (id) { $(id).value = ""; });
+    ["fT1lo", "fT1hi", "fT2lo", "fT2hi", "fT3lo", "fT3hi", "fB1lo", "fB1hi", "fB2lo", "fB2hi", "fRwarn", "fRdanger", "fMax", "fBudget", "fFloor", "fBand"].forEach(function (id) { $(id).value = ""; });
     if (!p) return;
     (p.takes || []).forEach(function (t, i) { if (i < 3) { $("fT" + (i + 1) + "lo").value = t.lo; $("fT" + (i + 1) + "hi").value = t.hi; } });
+    (p.buys || []).forEach(function (b, i) { if (i < 2) { $("fB" + (i + 1) + "lo").value = b.lo; $("fB" + (i + 1) + "hi").value = b.hi; } });
     (p.reds || []).forEach(function (r) {
       if (r.level === "warn" && $("fRwarn").value === "") $("fRwarn").value = r.at;
       else if (r.level === "danger" && $("fRdanger").value === "") $("fRdanger").value = r.at;
@@ -1364,6 +1469,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     }
     var parts = [];
     (p.takes || []).forEach(function (t) { parts.push("减仓 " + t.lo + "–" + t.hi); });
+    (p.buys || []).forEach(function (b) { parts.push("加仓 " + b.lo + "–" + b.hi + (b.shares ? "（" + b.shares + " 股）" : "")); });
     (p.reds || []).forEach(function (r) { parts.push((r.level === "danger" ? "清仓线 " : "减半线 ") + r.at); });
     if (p.maxShares != null) parts.push("仓位上限 " + p.maxShares + " 股");
     if (p.lossBudget != null) parts.push("预算 " + p.lossBudget + " " + curLabel());
@@ -2006,6 +2112,20 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     closeSheet(); renderPlanSummary();
     if (metrics) render(metrics, parsed ? parsed.points : []);
   });
+  $("btnPlanSuggest").addEventListener("click", function () {
+    if (!metrics) { alert("行情未就绪，稍后再试"); return; }
+    var points = allPointsNow();
+    var pos = curPos();
+    var refs = C.intradayRefs(metrics, points, pos, { code: st.code, plan: curPlan() });
+    if (!refs.ok) { alert("分时数据不足，暂时无法生成建议（可先手动填）"); return; }
+    var sp = C.suggestPlan(metrics, refs, mpData, ctx3Data, pos, st.code);
+    planToForm(sp);
+    var tip = $("planSuggestTip");
+    if (tip) tip.textContent = "已填入建议：减仓 " + sp.takes.length + " 档 · 加仓 " + sp.buys.length +
+      " 档 · 止损 " + (sp.reds[0] ? sp.reds[0].at : "—") + " · 仓位上限 " + sp.maxShares +
+      " 股。请核对后点「保存计划」。";
+  });
+
   $("btnPlanClear").addEventListener("click", function () {
     delete st.plans[st.code]; save({ plans: st.plans });
     closeSheet(); renderPlanSummary();

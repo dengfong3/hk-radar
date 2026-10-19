@@ -404,5 +404,54 @@ ok("统计：文案含累计不可用", C.srcHealthText(hh).includes("累计不�
 ok("渲染：页脚显示源健康", h1.txt("footHealth").includes("源健康"), h1.txt("footHealth"));
 ok("渲染：一次成功取数后腾讯计数 +1", /腾讯 1/.test(h1.txt("footHealth")), h1.txt("footHealth"));
 
+
+/* ---------- 13) 加减仓数量按持仓比例 + 计划支持加仓 + 一键建议 ---------- */
+console.log("\n[数量分配 / 加仓计划 / 一键建议]");
+ok("核心导出 suggestQtys / suggestPlan", !!(C.suggestQtys && C.suggestPlan));
+
+// 1000 股持仓：减仓应分 200/300/500，而不是一律 100
+const q1000 = C.suggestQtys({ shares: 1000 }, null,
+  { reduce: [{ price: 110 }, { price: 115 }, { price: 120 }], add: [{ price: 90 }, { price: 85 }] }, "sh603083");
+ok("减仓数量按 25%/35%/剩余 分配（200/300/500）",
+  q1000.reduce.map((x) => x.qty).join(",") === "200,300,500", q1000.reduce.map((x) => x.qty));
+ok("加仓数量按容量 50%/剩余 分配（200/300）",
+  q1000.add.map((x) => x.qty).join(",") === "200,300", q1000.add.map((x) => x.qty));
+ok("加仓总量不超过容量（500）", q1000.add.reduce((a, b) => a + b.qty, 0) === 500);
+
+// 有仓位上限时，可用容量 = 上限 − 持仓
+const qCap = C.suggestQtys({ shares: 100 }, { maxShares: 500 },
+  { reduce: [{ price: 110 }, { price: 120 }], add: [{ price: 90 }, { price: 85 }] }, "sh603083");
+ok("减仓：只持 1 手时分完即止（100/0）", qCap.reduce.map((x) => x.qty).join(",") === "100,0", qCap.reduce.map((x) => x.qty));
+ok("加仓：容量 400 分 200/200", qCap.add.map((x) => x.qty).join(",") === "200,200", qCap.add.map((x) => x.qty));
+
+// suggestPlan：把触发价整理成计划
+const refsForPlan = { ok: true,
+  reduce: [{ price: 110, why: "均价 +1.2×", qty: 200 }, { price: 115, why: "枢轴 R1", qty: 300 }, { price: 120, why: "前高", qty: 500 }],
+  add: [{ price: 90, why: "枢轴 S1", qty: 200 }, { price: 85, why: "前低", qty: 300 }] };
+const spTest = C.suggestPlan({ price: 100, high: 105, low: 95, prevClose: 99, vwap: 100, vwapDevPct: 0, volRatio: 1 },
+  refsForPlan, { keySup: [95, 90] }, { days: 3 }, { shares: 1000, cost: 96 }, "sh603083");
+ok("建议计划：3 个减仓档", spTest.takes.length === 3, spTest.takes.length);
+ok("建议计划：2 个加仓档（含股数）", spTest.buys.length === 2 && spTest.buys[0].shares > 0, spTest.buys);
+ok("建议计划：1 条止损线且低于现价", spTest.reds.length === 1 && spTest.reds[0].at < 100, spTest.reds);
+ok("建议计划：仓位上限按本金/价格取整", spTest.maxShares >= 100 && spTest.maxShares % 100 === 0, spTest.maxShares);
+ok("建议计划：levels 汇总用于轮询加速", spTest.levels.length === 6, spTest.levels);
+
+// 表单：加仓字段 + 保存后 plan.buys 有值
+h2.byId("fB1lo").value = 90; h2.byId("fB1hi").value = 92;
+h2.byId("fB2lo").value = 86; h2.byId("fB2hi").value = 88;
+h2.byId("fMax").value = 500;
+h2.byId("btnPlanSave").listeners.click[0]();
+const savedB = h2.saved().plans.hk06166;
+ok("保存后计划含 2 个加仓档", savedB && savedB.buys.length === 2, savedB && savedB.buys);
+ok("加仓档带股数（容量 400 → 200/120 取整手）", savedB && savedB.buys[0].shares > 0, savedB && savedB.buys.map((b) => b.shares));
+ok("计划摘要显示加仓", h2.txt("planSummary").includes("加仓 90–92"), h2.txt("planSummary"));
+
+// 一键生成建议：点按钮后表单被填充
+h2.byId("btnPlanSuggest").listeners.click[0]();
+ok("一键建议：减仓1 下沿被填充", h2.byId("fT1lo").value !== "", h2.byId("fT1lo").value);
+ok("一键建议：加仓1 下沿被填充", h2.byId("fB1lo").value !== "", h2.byId("fB1lo").value);
+ok("一键建议：止损线被填充", h2.byId("fRwarn").value !== "", h2.byId("fRwarn").value);
+ok("一键建议：提示文案出现", h2.txt("planSuggestTip").includes("已填入建议"), h2.txt("planSuggestTip"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
