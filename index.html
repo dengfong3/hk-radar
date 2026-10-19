@@ -95,6 +95,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 .ledrow{font-size:11.5px;color:#a9b6c9;border-left:2px solid #334155;padding-left:7px;line-height:1.5}
 .ledrow.win{border-color:#22c55e}.ledrow.loss{border-color:#ef4444}.ledrow.open{border-color:#eab308}
 .ledrow b{color:#e2e8f0}
+.washsum{font-size:12px;font-weight:600;line-height:1.5}
+.washsum.wash{color:#86efac}.washsum.dist{color:#fca5a5}.washsum.unclear{color:#cbd5e1}
+.washrow{display:grid;grid-template-columns:88px 1fr;gap:2px 8px;font-size:11px;color:#94a3b8}
+.washrow b{color:#cbd5e1;font-weight:600}
+.washrow .lw{color:#86efac}.washrow .ld{color:#fca5a5}.washrow .ln{color:#94a3b8}
 .ledclear{font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);background:var(--card2);color:#a9b6c9;min-height:24px}
 .srow{border-radius:8px;padding:7px 9px;font-size:13px;border-left:3px solid #475569;background:var(--card2)}
 .srow.buy{border-color:#38bdf8;color:#bae6fd}
@@ -251,6 +256,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 <div class="card">
   <div class="card-title"><b>智能信号</b><span class="sp"></span><span id="sigMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="sigBox"></div>
+</div>
+
+<div class="card">
+  <div class="card-title"><b>洗盘 / 出货检测</b><span class="sp"></span><span id="washMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="washBox"></div>
 </div>
 
 <div class="card">
@@ -970,6 +980,107 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       return "chop";
     }
 
+
+    /**
+     * 洗盘 / 出货证据检测（量价形态统计，非"主力意图"判定）
+     * 6 个维度：涨跌量比、均价上方时间、日内位置、尾盘 30 分钟、多日量能、多周期方向。
+     * 返回 wash/dist 计数与倾向结论；证据不明时 verdict = "unclear"。
+     */
+    function washoutDetect(m, points, mp, ctx3, code, opt) {
+      const out = { ok: false, wash: 0, dist: 0, verdict: "unclear", items: [], summary: "",
+        support: null, resistance: null, note: "" };
+      if (!m || !(m.price > 0) || !(m.prevClose > 0) || !points || points.length < 30) return out;
+      out.ok = true;
+      const price = m.price, prev = m.prevClose;
+      const chgPct = (price / prev - 1) * 100;
+      const vwap = m.vwap > 0 ? m.vwap : null;
+      const items = [];
+      const add = (key, label, value, lean, detail) => {
+        items.push({ key, label, value, lean, detail });
+        if (lean === "wash") out.wash++;
+        else if (lean === "dist") out.dist++;
+      };
+      // 1) 涨跌量比
+      let upV = 0, downV = 0;
+      for (let i = 1; i < points.length; i++) {
+        const d = points[i].price - points[i - 1].price;
+        const v = points[i].volInc || 0;
+        if (d > 0) upV += v; else if (d < 0) downV += v;
+      }
+      const ratio = downV > 0 ? upV / downV : (upV > 0 ? 3 : 1);
+      add("volRatio", "涨跌量比", ratio.toFixed(2),
+        ratio >= 1.3 ? "wash" : ratio <= 0.75 ? "dist" : "neutral",
+        ratio >= 1.3 ? "上涨放量、下跌缩量（洗盘特征）" : ratio <= 0.75 ? "下跌放量、上涨缩量（出货特征）" : "上涨/下跌量能接近（中性）");
+      // 2) 均价上方时间
+      let above = 0;
+      for (const p of points) if (vwap && p.price >= vwap) above++;
+      const abovePct = vwap ? above / points.length : 0.5;
+      add("vwapTime", "均价上方时间", (abovePct * 100).toFixed(0) + "%",
+        abovePct >= 0.6 ? "wash" : abovePct <= 0.3 ? "dist" : "neutral",
+        abovePct >= 0.6 ? "大部分时间在均价上方（承接强）" : abovePct <= 0.3 ? "大部分时间在均价下方（承接弱）" : "均价附近反复");
+      // 3) 日内位置
+      let hi = -Infinity, lo = Infinity;
+      for (const p of points) { if (p.price > hi) hi = p.price; if (p.price < lo) lo = p.price; }
+      const posInDay = hi > lo ? (price - lo) / (hi - lo) : 0.5;
+      add("pos", "日内位置", (posInDay * 100).toFixed(0) + "%",
+        posInDay >= 0.6 ? "wash" : posInDay <= 0.25 ? "dist" : "neutral",
+        posInDay >= 0.6 ? "收在日内上半区（回落有限）" : posInDay <= 0.25 ? "贴着日内低点（弱势）" : "日内中部");
+      // 4) 尾盘 30 分钟
+      const tail = points.slice(-30);
+      if (tail.length >= 10) {
+        const tChg = (tail[tail.length - 1].price / tail[0].price - 1) * 100;
+        let tVol = 0; for (const p of tail) tVol += p.volInc || 0;
+        const prevBlock = points.slice(-60, -30);
+        let pVol = 0; for (const p of prevBlock) pVol += p.volInc || 0;
+        const tRel = pVol > 0 ? tVol / pVol : 1;
+        let lean = "neutral", detail = "尾盘表现中性";
+        if (tChg >= 0.3 && tRel >= 1.2) { lean = "wash"; detail = "尾盘放量回拉（护盘/吸筹迹象）"; }
+        else if (tChg <= -0.3 && tRel >= 1.2) { lean = "dist"; detail = "尾盘放量下杀（抛售）"; }
+        else if (tRel <= 0.8) { lean = "wash"; detail = "尾盘缩量（抛压衰竭）"; }
+        add("tail", "尾盘30分", (tChg >= 0 ? "+" : "") + tChg.toFixed(2) + "% · 量" + tRel.toFixed(2) + "×", lean, detail);
+      }
+      // 5) 多日量能（今日 vs 前几日均量）
+      const dayVol = {}; const dayKeys = [];
+      for (const p of points) {
+        const d = p.date || "";
+        if (!d) continue;
+        if (dayVol[d] == null) { dayVol[d] = 0; dayKeys.push(d); }
+        dayVol[d] += p.volInc || 0;
+      }
+      if (dayKeys.length >= 2) {
+        const keys = dayKeys.slice().sort();
+        const todayKey = keys[keys.length - 1];
+        const prevs = keys.slice(0, -1);
+        let avgPrev = 0;
+        for (const k of prevs) avgPrev += dayVol[k];
+        avgPrev /= prevs.length;
+        const vs = avgPrev > 0 ? dayVol[todayKey] / avgPrev : null;
+        if (vs != null) {
+          const lean = vs >= 1.5 && chgPct < -1 ? "dist" : vs <= 0.8 && chgPct <= 0 ? "wash" : "neutral";
+          add("volDay", "多日量能", vs.toFixed(2) + "×", lean,
+            lean === "dist" ? "放量下跌（出货嫌疑）" : lean === "wash" ? "缩量回调（洗盘特征）" : "量能常规");
+        }
+      }
+      // 6) 多周期方向
+      if (mp && mp.valid >= 2) {
+        const lean = mp.score >= 1 ? "wash" : mp.score <= -1 ? "dist" : "neutral";
+        add("mp", "多周期", (mp.score > 0 ? "+" : "") + mp.score + "/" + mp.valid, lean,
+          lean === "wash" ? "多周期偏多（趋势未破坏）" : lean === "dist" ? "多周期偏空（趋势转弱）" : "多周期分歧");
+      }
+      out.items = items;
+      out.verdict = out.wash >= out.dist + 2 ? "washout" : out.dist >= out.wash + 2 ? "distribution" : "unclear";
+      out.summary = "洗盘特征 " + out.wash + "/" + items.length + " · 出货特征 " + out.dist + "/" + items.length + " → " +
+        (out.verdict === "washout" ? "倾向洗盘（缩量回调、承接尚可）"
+          : out.verdict === "distribution" ? "倾向出货/走弱（放量下跌、承接弱）"
+          : "证据不明（多空混杂，不据此操作）");
+      const sups = ((mp && mp.keySup) || []).filter((x) => x > 0 && x < price).sort((a, b) => b - a);
+      const ress = ((mp && mp.keyRes) || []).filter((x) => x > price).sort((a, b) => a - b);
+      out.support = sups.length ? sups[0] : lo;
+      out.resistance = ress.length ? ress[0] : hi;
+      out.note = "主力意图无法从公开数据证实；这是量价证据的倾向统计，不构成投资建议。";
+      return out;
+    }
+
     /**
      * 共识打分：把「多周期趋势 + MACD + KDJ + 量价 + 位置」加权成一个 0-100 分，
      * 给出一张带「触发区间 / 确认条件 / 止损 / 目标 / 盈亏比 / 建议仓位」的单子；
@@ -1062,6 +1173,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         // 涨停：只要不是在建议减仓，就不该追；跌停：只要不是在建议持有/买入，就不该杀跌
         if (out.limit.atUp && out.side !== "reduce") V.push(limTxt + "：当日无上行空间，不追");
         if (out.limit.atDown && out.side !== "long") V.push(limTxt + "：当日无下行空间，不杀跌");
+      }
+      // 洗盘/出货证据：出货特征明显时否决做多
+      out.wash = washoutDetect(m, opt && opt.points, mp, ctx3, code, opt);
+      if (out.wash && out.wash.ok && out.wash.verdict === "distribution" && out.side !== "reduce") {
+        V.push("出货特征明显（" + out.wash.dist + "/" + out.wash.items.length + "）：不做多");
       }
       // 触发区间 / 止损 / 目标
       const refsReduce = (refs && refs.reduce) || [];
@@ -1619,6 +1735,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     macdCalc: macdCalc, kdjCalc: kdjCalc, volumeState: volumeState, regimeOf: regimeOf,
     scoreSetup: scoreSetup, ledgerAdd: ledgerAdd, ledgerEval: ledgerEval, ledgerStats: ledgerStats,
     limitPctOf: limitPctOf, limitStateOf: limitStateOf,
+    washoutDetect: washoutDetect,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
@@ -1634,7 +1751,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.10 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.11 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -1746,6 +1863,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var refs = C.intradayRefs(metrics, points, pos, { code: st.code, plan: plan });
     var sp = C.scoreSetup(metrics, mpData, ctx3Data, refs, pos, plan, { code: st.code, points: points });
     lastSetup = sp;
+    lastWash = C.washoutDetect(metrics, points, mpData, ctx3Data, st.code, {});
+    renderWashCard(lastWash);
     recordLedger(sp);
     var sideTxt = sp.side === "long" ? "偏多（找买点）" : sp.side === "reduce" ? "偏空（找减仓）" : "无方向";
     var g = sp.grade === "noTrade" ? "N" : sp.grade;
@@ -1807,6 +1926,29 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     box.innerHTML = html;
     if (meta) meta.textContent = "共识评分";
     renderLedgerCard();
+  }
+
+  var lastWash = null;
+  function renderWashCard(w) {
+    var box = $("washBox");
+    if (!box) return;
+    if (!w || !w.ok) { box.innerHTML = '<div class="sigwhy">分时数据不足（至少需要 30 个分钟点）</div>'; return; }
+    var cls = w.verdict === "washout" ? "wash" : w.verdict === "distribution" ? "dist" : "unclear";
+    var html = '<div class="washsum ' + cls + '">' + w.summary + "</div>";
+    for (var i = 0; i < w.items.length; i++) {
+      var it = w.items[i];
+      var c = it.lean === "wash" ? "lw" : it.lean === "dist" ? "ld" : "ln";
+      var icon = it.lean === "wash" ? "▲" : it.lean === "dist" ? "▼" : "·";
+      html += '<div class="washrow"><span class="' + c + '">' + icon + " " + it.label + "</span><span><b>" + it.value + "</b> · " + it.detail + "</span></div>";
+    }
+    if (w.support != null) {
+      html += '<div class="sigwhy">关键位：支撑 <b>' + w.support.toFixed(2) + "</b>" +
+        (w.resistance != null ? " · 压力 <b>" + w.resistance.toFixed(2) + "</b>" : "") + "</div>";
+    }
+    html += '<div class="sigwhy" style="font-size:10.5px">' + w.note + "</div>";
+    box.innerHTML = html;
+    var meta = $("washMeta");
+    if (meta) meta.textContent = "量价证据";
   }
 
   function renderLedgerCard() {

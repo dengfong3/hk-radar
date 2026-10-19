@@ -583,5 +583,45 @@ ok("涨停 + 多头：等级 = 不交易", limSp.grade === "noTrade", limSp.grad
 ok("涨停：否决原因出现『当日无上行空间』", limSp.vetoes.some((v) => v.indexOf("当日无上行空间") >= 0), limSp.vetoes);
 ok("涨停：限价信息随信号返回", limSp.limit && limSp.limit.atUp === true, limSp.limit);
 
+
+/* ---------- 16) 洗盘 / 出货证据检测 ---------- */
+console.log("\n[洗盘/出货检测]");
+ok("导出 washoutDetect", typeof C.washoutDetect === "function");
+ok("数据不足 → ok=false", C.washoutDetect({ price: 100, prevClose: 100, vwap: 100 }, [], null, null, "sh600418", {}).ok === false);
+
+// 出货样本：放量下跌、全天在均价下方、贴日内低、尾盘放量下杀
+const distPts = [];
+for (let i = 0; i < 100; i++) distPts.push({ date: "2026-10-16", slot: i, price: 100 + Math.sin(i) * 0.02, volInc: 300 });
+for (let i = 0; i < 200; i++) distPts.push({ date: "2026-10-19", slot: i, price: 100 - i * 0.02, volInc: i >= 170 ? 600 : 400 });
+const distM = { price: 96, prevClose: 100, high: 100.2, low: 96, vwap: 98.5, vwapDevPct: -2.5 };
+const wDist = C.washoutDetect(distM, distPts, { valid: 3, score: -3, keySup: [95], keyRes: [97] }, null, "sh600418", {});
+ok("出货样本 → 倾向出货", wDist.ok && wDist.verdict === "distribution", [wDist.verdict, wDist.summary]);
+ok("出货样本：出货特征计数 > 洗盘特征", wDist.dist > wDist.wash, [wDist.wash, wDist.dist]);
+ok("出货样本：关键位返回支撑/压力", wDist.support != null && wDist.resistance != null, [wDist.support, wDist.resistance]);
+
+// 洗盘样本：缩量下探后放量收回、多数时间在均价上方、尾盘回拉
+const washPts = [];
+for (let i = 0; i < 200; i++) washPts.push({ date: "2026-10-16", slot: i, price: 100, volInc: 400 });
+for (let i = 0; i < 40; i++) washPts.push({ date: "2026-10-19", slot: i, price: 100 - i * 0.02, volInc: 60 });
+for (let i = 40; i < 200; i++) {
+  const t = (i - 40) / 159;
+  washPts.push({ date: "2026-10-19", slot: i, price: 99.2 + t * 1.1, volInc: i >= 170 ? 350 : 250 });
+}
+const washM = { price: 100.3, prevClose: 100, high: 100.3, low: 99.2, vwap: 99.5, vwapDevPct: 0.8 };
+const wWash = C.washoutDetect(washM, washPts, { valid: 3, score: 2, keySup: [99.4], keyRes: [100.6] }, null, "sh600418", {});
+ok("洗盘样本 → 倾向洗盘", wWash.ok && wWash.verdict === "washout", [wWash.verdict, wWash.summary]);
+ok("洗盘样本：洗盘特征计数 > 出货特征", wWash.wash > wWash.dist, [wWash.wash, wWash.dist]);
+
+// 接入共识评分：出货特征明显 → 否决做多
+const washRefs = C.intradayRefs(distM, distPts, { shares: 0, cost: 0 }, { code: "sh600418", plan: null });
+const spDist = C.scoreSetup(distM, { valid: 4, score: 4, bias: "强多", keyRes: [97], keySup: [95], byPeriod: {} }, null,
+  washRefs, { shares: 0, cost: 0 }, null, { code: "sh600418", points: distPts });
+ok("评分：出货特征 → 一票否决『不做多』", spDist.vetoes.some((v) => v.indexOf("出货特征明显") >= 0), spDist.vetoes);
+ok("评分：返回 wash 检测结果", !!spDist.wash && spDist.wash.verdict === "distribution", spDist.wash && spDist.wash.verdict);
+
+// 页面渲染
+ok("页面含洗盘/出货检测卡片", html.includes("washBox") && html.includes("洗盘 / 出货检测"));
+ok("渲染：洗盘/出货卡片有内容", h1.deep("washBox").length > 10, h1.deep("washBox").slice(0, 60));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
