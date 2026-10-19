@@ -453,5 +453,109 @@ ok("一键建议：加仓1 下沿被填充", h2.byId("fB1lo").value !== "", h2.b
 ok("一键建议：止损线被填充", h2.byId("fRwarn").value !== "", h2.byId("fRwarn").value);
 ok("一键建议：提示文案出现", h2.txt("planSuggestTip").includes("已填入建议"), h2.txt("planSuggestTip"));
 
+
+/* ---------- 14) 共识评分引擎 / 指标 / 台账 ---------- */
+console.log("\n[共识评分引擎与台账]");
+ok("核心导出指标与引擎", !!(C.macdCalc && C.kdjCalc && C.volumeState && C.regimeOf && C.scoreSetup && C.ledgerAdd && C.ledgerEval && C.ledgerStats));
+
+// 合成数据：3 天 × 240 根 1 分钟
+function synth(days, perDay, drift) {
+  const pts = [];
+  let price = 100;
+  for (let d = 0; d < days; d++) {
+    const date = "2026-10-" + String(15 + d).padStart(2, "0");
+    for (let i = 0; i < perDay; i++) {
+      price += drift + Math.sin(i / 7) * 0.05;
+      pts.push({ date, slot: i, hhmm: String(9 + Math.floor(i / 60)).padStart(2, "0") + ":" + String(i % 60).padStart(2, "0"), price, volInc: 100 * (1 + 0.3 * Math.sin(i / 11)), cumVol: 0 });
+    }
+  }
+  return pts;
+}
+const upPts = synth(3, 240, 0.02);
+const flatPts = synth(3, 240, 0.0);
+
+// MACD：上升序列 → 多头且零轴上方
+const macdUp = C.macdCalc(upPts.map((p) => p.price));
+ok("MACD：上升序列 DIF>DEA 且在零轴上方", macdUp && macdUp.bull && macdUp.aboveZero, macdUp && { dif: macdUp.dif, dea: macdUp.dea });
+ok("MACD：字段齐全", macdUp && typeof macdUp.hist === "number" && ["gold", "dead", null].includes(macdUp.cross));
+
+// KDJ：上升序列 K>50
+const barsUp = C.buildBars(upPts, 5);
+const kdjUp = C.kdjCalc(barsUp);
+ok("KDJ：上升序列 K>50 且 K>D", kdjUp && kdjUp.k > 50 && kdjUp.bull, kdjUp && { k: kdjUp.k, d: kdjUp.d, j: kdjUp.j });
+
+// 量价状态
+function mkBars(list) { return list.map((x) => ({ o: x[0], h: x[1], l: x[2], c: x[3], v: x[4] })); }
+const flat19 = []; for (let i = 0; i < 19; i++) flat19.push([100, 100.5, 99.5, 100, 100]);
+const vBreakout = mkBars(flat19.concat([[100, 101, 100, 101, 200]]));
+ok("量价：放量突破", C.volumeState(vBreakout) === "breakout", C.volumeState(vBreakout));
+const vShrink = mkBars(flat19.concat([[100, 101, 100, 101, 40]]));
+ok("量价：缩量新高（警惕）", C.volumeState(vShrink) === "shrinkNewHigh", C.volumeState(vShrink));
+const vStall = mkBars(flat19.concat([[100, 101, 99, 99, 300]]));
+ok("量价：放量滞涨", C.volumeState(vStall) === "stallHighVol", C.volumeState(vStall));
+const vHealthy = mkBars(flat19.concat([[100, 100.5, 99, 99, 40]]));
+ok("量价：缩量回调（健康）", C.volumeState(vHealthy) === "healthyPullback", C.volumeState(vHealthy));
+
+// 市场状态
+ok("状态：4 周期 +3 → 趋势向上", C.regimeOf({ valid: 4, score: 3 }) === "trendUp", C.regimeOf({ valid: 4, score: 3 }));
+ok("状态：方向分歧 → 震荡", C.regimeOf({ valid: 4, score: 1 }) === "chop", C.regimeOf({ valid: 4, score: 1 }));
+
+// 共识评分：上升数据 → 偏多且给出可执行单子
+const mpUp = C.multiPeriod(upPts);
+const ctxUp = C.threeDayContext(upPts, 3);
+const mUp = { price: upPts[upPts.length - 1].price, prevClose: 100, high: 105, low: 95, vwap: upPts[upPts.length - 1].price * 0.995, vwapDevPct: 0.5, volRatio: 1.2 };
+const refsUp = C.intradayRefs(mUp, upPts, { shares: 0, cost: 0 }, { code: "sh603083", plan: null });
+const spUp = C.scoreSetup(mUp, mpUp, ctxUp, refsUp, { shares: 0, cost: 0 }, null, { code: "sh603083", points: upPts });
+ok("评分：上升数据 → ok 且有评分", spUp.ok && spUp.score >= 0 && spUp.score <= 100, spUp.score);
+ok("评分：指标覆盖 5/15 分钟（30/60 需更长历史）", !!(spUp.indicators[5] && spUp.indicators[15]), Object.keys(spUp.indicators));
+ok("评分：给出理由列表", spUp.reasons.length > 0, spUp.reasons.slice(0, 3));
+ok("评分：方向为多或拒绝", spUp.side === "long" || spUp.grade === "noTrade", [spUp.side, spUp.grade]);
+ok("评分：等级合法", ["A", "B", "C", "noTrade"].includes(spUp.grade), spUp.grade);
+if (spUp.entry) {
+  ok("评分：止损 < 入场 < 目标", spUp.stop < spUp.entry.lo && spUp.target > spUp.entry.hi, [spUp.stop, spUp.entry, spUp.target]);
+  ok("评分：盈亏比 >= 2 才不否决", spUp.rr >= 2 || spUp.vetoes.some((v) => v.indexOf("盈亏比") >= 0), spUp.rr);
+}
+
+// 震荡 → 拒绝交易（直接构造 mp，避免合成数据的巧合）
+const mChop = { price: 100, prevClose: 100, high: 101, low: 99, vwap: 100, vwapDevPct: 0, volRatio: 1 };
+const spChop = C.scoreSetup(mChop, { valid: 4, score: 0, keyRes: [101], keySup: [99], byPeriod: {} },
+  ctxUp, refsUp, { shares: 0, cost: 0 }, null, { code: "sh603083", points: upPts });
+ok("评分：震荡区 → 拒绝交易", spChop.grade === "noTrade", spChop.grade);
+ok("评分：震荡否决原因明确", spChop.vetoes.some((v) => v.indexOf("震荡") >= 0), spChop.vetoes);
+
+// 追高 → 拒绝
+const spChase = C.scoreSetup({ price: 100, prevClose: 99, high: 100, low: 98, vwap: 96.5, vwapDevPct: 3.6, volRatio: 1 },
+  { valid: 4, score: 4, keyRes: [], keySup: [99], byPeriod: {} }, ctxUp, refsUp, { shares: 0, cost: 0 }, null,
+  { code: "sh603083", points: upPts });
+ok("评分：距均价过远 → 拒绝（追高）", spChase.grade === "noTrade" && spChase.vetoes.some((v) => v.indexOf("追高") >= 0), spChase.vetoes);
+
+// 空仓时看空 → 拒绝（不做空）
+const spNoPos = C.scoreSetup({ price: 100, prevClose: 101, high: 101, low: 99, vwap: 100.5, vwapDevPct: -0.5, volRatio: 1 },
+  { valid: 4, score: -4, keyRes: [101], keySup: [95], byPeriod: {} }, ctxUp, refsUp, { shares: 0, cost: 0 }, null,
+  { code: "sh603083", points: upPts });
+ok("评分：空仓看空 → 拒绝（不做空）", spNoPos.grade === "noTrade" && spNoPos.vetoes.some((v) => v.indexOf("无持仓") >= 0), spNoPos.vetoes);
+
+// 台账：记录 → 结算 → 统计
+let lg = { records: [] };
+const setupWin = { ok: true, grade: "B", side: "long", score: 72, entry: { lo: 100, hi: 100 }, stop: 98.5, target: 103, rr: 2, size: 100 };
+C.ledgerAdd(lg, setupWin, "sh603083", 1000);
+ok("台账：记录 1 条（open）", lg.records.length === 1 && lg.records[0].status === "open", lg.records[0]);
+C.ledgerEval(lg, "sh603083", 103.2, 2000);
+ok("台账：到目标 → result=target", lg.records[0].result === "target", lg.records[0].result);
+ok("台账：收益 +3%", Math.abs(lg.records[0].retPct - 3) < 1e-6, lg.records[0].retPct);
+C.ledgerAdd(lg, { ok: true, grade: "A", side: "long", score: 80, entry: { lo: 100, hi: 100 }, stop: 98, target: 104, rr: 2, size: 100 }, "sh603083", 3000);
+C.ledgerEval(lg, "sh603083", 97.5, 4000);
+ok("台账：打止损 → result=stop 且收益为负", lg.records[1].result === "stop" && lg.records[1].retPct < 0, [lg.records[1].result, lg.records[1].retPct]);
+const stt = C.ledgerStats(lg);
+ok("台账：统计 2 笔、胜 1 负 1、胜率 50%", stt.total === 2 && stt.target === 1 && stt.stop === 1 && Math.abs(stt.winRate - 50) < 1e-6, stt);
+ok("台账：期望值可算", stt.expectancy != null && typeof stt.expectancy === "number", stt.expectancy);
+ok("台账：noTrade 不记录", (function () { const l2 = { records: [] }; C.ledgerAdd(l2, { grade: "noTrade", side: "long" }, "x", 1); return l2.records.length === 0; })());
+
+// 页面渲染：卡片存在且显示
+ok("页面含智能信号卡片", html.includes("sigBox") && html.includes("智能信号"));
+ok("页面含信号台账卡片", html.includes("ledgerBox") && html.includes("信号台账"));
+ok("渲染：智能信号有内容", h1.deep("sigBox").length > 10, h1.deep("sigBox").slice(0, 60));
+ok("渲染：台账有内容", h1.deep("ledgerBox").length > 5, h1.deep("ledgerBox").slice(0, 60));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

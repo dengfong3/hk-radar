@@ -77,6 +77,25 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 .lv{width:70px;text-align:right;color:#94a3b8}
 .lnow{text-align:center;font-size:11px;color:var(--dim2);margin:3px 0}
 .sig{display:flex;flex-direction:column;gap:5px}
+.sigbox{display:flex;flex-direction:column;gap:6px;font-size:12px}
+.sighead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.siggrade{font-weight:700;padding:2px 8px;border-radius:6px;font-size:12px}
+.siggrade.A{background:#7f1d1d;color:#fecaca}
+.siggrade.B{background:#78350f;color:#fde68a}
+.siggrade.C{background:#334155;color:#cbd5e1}
+.siggrade.N{background:#1e293b;color:#94a3b8;border:1px solid #475569}
+.sigscore{font-size:12px;color:#cbd5e1}
+.sigline{display:flex;gap:10px;flex-wrap:wrap}
+.sigline b{color:#e2e8f0}
+.sigveto{color:#fca5a5;font-size:12px}
+.sigwhy{color:#94a3b8;font-size:11.5px;line-height:1.55}
+.itab{display:grid;grid-template-columns:34px repeat(3,1fr);gap:2px 6px;font-size:11px;color:#94a3b8}
+.itab .ih{color:#64748b}
+.itab .g{color:#38bdf8}.itab .d{color:#f87171}.itab .n{color:#64748b}
+.ledrow{font-size:11.5px;color:#a9b6c9;border-left:2px solid #334155;padding-left:7px;line-height:1.5}
+.ledrow.win{border-color:#22c55e}.ledrow.loss{border-color:#ef4444}.ledrow.open{border-color:#eab308}
+.ledrow b{color:#e2e8f0}
+.ledclear{font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);background:var(--card2);color:#a9b6c9;min-height:24px}
 .srow{border-radius:8px;padding:7px 9px;font-size:13px;border-left:3px solid #475569;background:var(--card2)}
 .srow.buy{border-color:#38bdf8;color:#bae6fd}
 .srow.sell{border-color:#f59e0b;color:#fde68a}
@@ -227,6 +246,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="card-title"><b>多周期节奏</b><span class="sp"></span><span id="mpBias" style="font-size:10px"></span></div>
   <div class="hint" id="snapHint" style="display:none"></div>
   <div class="mp" id="mp"></div>
+</div>
+
+<div class="card">
+  <div class="card-title"><b>智能信号</b><span class="sp"></span><span id="sigMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="sigBox"></div>
+</div>
+
+<div class="card">
+  <div class="card-title"><b>信号台账</b><span class="sp"></span><span id="ledgerMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="ledgerBox"></div>
 </div>
 
 <div class="card">
@@ -847,7 +876,274 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         pe: null, amplitude: null, high52: null, low52: null, lotSize: null } };
   }
 
+    
+    /* ================= 指标：MACD(12,26,9) / KDJ(9,3,3) / 量价状态 ================= */
+    function macdCalc(closes, opt) {
+      if (!closes || closes.length < 35) return null;
+      const fast = (opt && opt.fast) || 12, slow = (opt && opt.slow) || 26, sig = (opt && opt.signal) || 9;
+      const ef = ema(closes, fast), es = ema(closes, slow);
+      const dif = closes.map((c, i) => ef[i] - es[i]);
+      const dea = ema(dif, sig);
+      const hist = dif.map((d, i) => (d - dea[i]) * 2);
+      const n = closes.length - 1;
+      const cross = (dif[n] > dea[n] && dif[n - 1] <= dea[n - 1]) ? "gold"
+        : (dif[n] < dea[n] && dif[n - 1] >= dea[n - 1]) ? "dead" : null;
+      // 背离：最近 20 根内，价格新高但 DIF 未新高（顶）/ 反之（底）
+      let divergence = null;
+      const look = Math.min(20, n);
+      if (look >= 8) {
+        const pNow = closes[n], pPrevHigh = Math.max.apply(null, closes.slice(n - look, n - 3));
+        const dNow = dif[n], dPrevHigh = Math.max.apply(null, dif.slice(n - look, n - 3));
+        if (pNow > pPrevHigh && dNow < dPrevHigh) divergence = "top";
+        const pPrevLow = Math.min.apply(null, closes.slice(n - look, n - 3));
+        const dPrevLow = Math.min.apply(null, dif.slice(n - look, n - 3));
+        if (pNow < pPrevLow && dNow > dPrevLow) divergence = "bottom";
+      }
+      return { dif: dif[n], dea: dea[n], hist: hist[n], prevHist: hist[n - 1], cross,
+        aboveZero: dif[n] > 0, bull: dif[n] > dea[n], divergence };
+    }
+
+    function kdjCalc(bars, opt) {
+      const n = (opt && opt.n) || 9;
+      if (!bars || bars.length < n + 3) return null;
+      let k = 50, d = 50;
+      const ks = [], ds = [], js = [];
+      for (let i = 0; i < bars.length; i++) {
+        const win = bars.slice(Math.max(0, i - n + 1), i + 1);
+        let hi = -Infinity, lo = Infinity;
+        for (const b of win) { if (b.h > hi) hi = b.h; if (b.l < lo) lo = b.l; }
+        const rsv = hi > lo ? (bars[i].c - lo) / (hi - lo) * 100 : 50;
+        k = (2 / 3) * k + (1 / 3) * rsv;
+        d = (2 / 3) * d + (1 / 3) * k;
+        ks.push(k); ds.push(d); js.push(3 * k - 2 * d);
+      }
+      const m = bars.length - 1;
+      const cross = (ks[m] > ds[m] && ks[m - 1] <= ds[m - 1]) ? "gold"
+        : (ks[m] < ds[m] && ks[m - 1] >= ds[m - 1]) ? "dead" : null;
+      return { k: ks[m], d: ds[m], j: js[m], cross,
+        zone: ks[m] >= 80 ? "over" : ks[m] <= 20 ? "under" : "mid", bull: ks[m] > ds[m] };
+    }
+
+    /** 量价状态：放量突破 / 缩量新高（警惕）/ 放量滞涨 / 缩量回调（健康） */
+    function volumeState(bars) {
+      if (!bars || bars.length < 8) return "normal";
+      const n = bars.length, last = bars[n - 1];
+      const prev = bars.slice(Math.max(0, n - 21), n - 1);
+      if (!prev.length) return "normal";
+      let avg = 0, hi = -Infinity;
+      for (const b of prev) { avg += b.v; if (b.h > hi) hi = b.h; }
+      avg /= prev.length;
+      const vx = avg > 0 ? last.v / avg : 1;
+      const newHigh = last.c >= hi * 0.999;
+      if (newHigh && vx >= 1.5) return "breakout";
+      if (newHigh && vx <= 0.7) return "shrinkNewHigh";
+      if (vx >= 2 && last.c < last.o && last.h >= hi * 0.999) return "stallHighVol";
+      if (vx <= 0.8 && last.c < last.o) return "healthyPullback";
+      return "normal";
+    }
+
+    /** 市场状态：趋势（上下）还是震荡（震荡区一律不交易） */
+    function regimeOf(mp) {
+      if (!mp || !mp.valid) return "unknown";
+      if (mp.valid >= 3 && Math.abs(mp.score) >= 3) return mp.score > 0 ? "trendUp" : "trendDown";
+      return "chop";
+    }
+
     /**
+     * 共识打分：把「多周期趋势 + MACD + KDJ + 量价 + 位置」加权成一个 0-100 分，
+     * 给出一张带「触发区间 / 确认条件 / 止损 / 目标 / 盈亏比 / 建议仓位」的单子；
+     * 任一一票否决成立 → grade = noTrade（明确拒绝交易）。
+     * 说明：这是规则化加权，不是预测；分数高不代表一定盈利。
+     */
+    function scoreSetup(m, mp, ctx3, refs, pos, plan, opt) {
+      const code = (opt && opt.code) || DEFAULT_CODE;
+      const price = m && m.price;
+      const lot = lotOf(code);
+      const out = { ok: false, side: "none", score: 50, grade: "noTrade", reasons: [], vetoes: [],
+        entry: null, stop: null, target: null, rr: null, size: 0, confirm: "", timing: "",
+        regime: "unknown", indicators: {}, detail: [] };
+      if (price == null || !(price > 0)) return out;
+      out.ok = true;
+      const regime = regimeOf(mp);
+      out.regime = regime;
+      const shares = pos && pos.shares > 0 ? pos.shares : 0;
+      const cost = pos && pos.cost > 0 ? pos.cost : 0;
+      const LB = (plan && plan.lossBudget > 0) ? plan.lossBudget : defaultBudgetFor(code);
+      const W = { 5: 1, 15: 1.5, 30: 2, 60: 3 };
+      let bull = 0, bear = 0;
+      const R = out.reasons, V = out.vetoes, D = out.detail;
+      // 逐周期指标（优先用传入的 points 现算，保证是连续数据）
+      let barsMap = null;
+      if (opt && opt.points && opt.points.length) {
+        barsMap = {};
+        for (const mm of [5, 15, 30, 60]) barsMap[mm] = buildBars(opt.points, mm);
+      } else if (mp && mp.bars) barsMap = mp.bars;
+      if (barsMap) {
+        for (const mm of [5, 15, 30, 60]) {
+          const bars = barsMap[mm];
+          if (!bars || bars.length < 13) continue;   // KDJ 只需 12 根；MACD 不足时自动返回 null 并标注
+          const closes = bars.map((b) => b.c);
+          const macd = macdCalc(closes);
+          const kdj = kdjCalc(bars);
+          const vs = volumeState(bars);
+          out.indicators[mm] = { macd, kdj, vs };
+          const w = W[mm];
+          if (macd) {
+            if (macd.cross === "gold") { bull += w; R.push(mm + "分 MACD 金叉"); }
+            if (macd.cross === "dead") { bear += w; R.push(mm + "分 MACD 死叉"); }
+            if (macd.bull && macd.aboveZero) bull += w * 0.5;
+            if (!macd.bull && !macd.aboveZero) bear += w * 0.5;
+            if (macd.divergence === "top") { bear += w * 0.8; R.push(mm + "分 MACD 顶背离"); }
+            if (macd.divergence === "bottom") { bull += w * 0.8; R.push(mm + "分 MACD 底背离"); }
+          }
+          if (kdj) {
+            if (kdj.cross === "gold" && kdj.zone !== "over") { bull += w * 0.8; R.push(mm + "分 KDJ 金叉"); }
+            if (kdj.cross === "dead" && kdj.zone !== "under") { bear += w * 0.8; R.push(mm + "分 KDJ 死叉"); }
+            if (kdj.zone === "over") { bear += w * 0.4; R.push(mm + "分 KDJ 超买"); }
+            if (kdj.zone === "under") { bull += w * 0.4; R.push(mm + "分 KDJ 超卖"); }
+          }
+          if (vs === "breakout") { bull += w * 0.6; R.push(mm + "分 放量突破"); }
+          else if (vs === "shrinkNewHigh") { bear += w * 0.7; R.push(mm + "分 缩量新高（警惕）"); }
+          else if (vs === "stallHighVol") { bear += w * 0.6; R.push(mm + "分 放量滞涨"); }
+          else if (vs === "healthyPullback") { bull += w * 0.3; R.push(mm + "分 缩量回调（健康）"); }
+          D.push({ period: mm, macd: macd ? { cross: macd.cross, dif: macd.dif, dea: macd.dea, hist: macd.hist, bull: macd.bull, aboveZero: macd.aboveZero } : null,
+            kdj: kdj ? { k: kdj.k, d: kdj.d, j: kdj.j, cross: kdj.cross, zone: kdj.zone } : null, vs });
+        }
+      }
+      // 多周期趋势
+      if (mp && mp.valid >= 3) {
+        if (mp.score >= 3) { bull += 4; R.push("多周期共振偏多 " + (mp.score > 0 ? "+" : "") + mp.score + "/4"); }
+        else if (mp.score <= -3) { bear += 4; R.push("多周期共振偏空 " + mp.score + "/4"); }
+        else R.push("多周期有分歧 " + (mp.score > 0 ? "+" : "") + mp.score + "/4");
+      }
+      // 位置
+      if (m.vwapDevPct != null) {
+        if (m.vwapDevPct >= 2) { bear += 1.5; R.push("高于均价 " + m.vwapDevPct.toFixed(1) + "%（追高风险）"); }
+        else if (m.vwapDevPct <= -2) { bull += 1.5; R.push("低于均价 " + Math.abs(m.vwapDevPct).toFixed(1) + "%"); }
+      }
+      if (ctx3 && ctx3.posInRange != null) {
+        if (ctx3.posInRange <= 25) { bull += 1; R.push("3日区间低位 " + ctx3.posInRange.toFixed(0) + "%"); }
+        else if (ctx3.posInRange >= 80) { bear += 1; R.push("3日区间高位 " + ctx3.posInRange.toFixed(0) + "%"); }
+      }
+      // 一票否决
+      if (regime === "chop") V.push("震荡区（多周期方向不一致）：不交易");
+      if (m.vwapDevPct != null && m.vwapDevPct >= 3) V.push("距均价 +" + m.vwapDevPct.toFixed(1) + "%：追高，不做多");
+      if (!mp || mp.valid < 3) V.push("周期数据不足（开盘初期）：不交易");
+      const dir = bull - bear;
+      out.side = dir > 0.8 ? "long" : dir < -0.8 ? "reduce" : "none";
+      out.score = Math.max(0, Math.min(100, Math.round(50 + dir * 3.5)));
+      // 触发区间 / 止损 / 目标
+      const refsReduce = (refs && refs.reduce) || [];
+      const refsAdd = (refs && refs.add) || [];
+      const sups = ((mp && mp.keySup) || []).filter((x) => x < price * 0.995).sort((a, b) => b - a);
+      const ress = ((mp && mp.keyRes) || []).filter((x) => x > price * 1.005).sort((a, b) => a - b);
+      const r2 = (x) => Math.round(x * 100) / 100;
+      if (out.side === "long") {
+        const base = refsAdd.length ? Math.min(refsAdd[0].price, price) : price;
+        out.entry = { lo: r2(base * 0.998), hi: r2(price * 1.002) };
+        const stopBase = sups.length ? sups[0] : (mp && mp.byPeriod[30] ? mp.byPeriod[30].swingLow : price * 0.97);
+        out.stop = r2(stopBase * 0.997);
+        const tBase = ress.length ? ress[0] : price * 1.02;
+        out.target = r2(tBase * 0.998);
+      } else if (out.side === "reduce") {
+        const base = refsReduce.length ? Math.max(refsReduce[0].price, price) : price;
+        out.entry = { lo: r2(price * 0.998), hi: r2(base * 1.002) };
+        const stopBase = ress.length ? ress[0] : price * 1.03;
+        out.stop = r2(stopBase * 1.003);
+        const tBase = sups.length ? sups[0] : price * 0.98;
+        out.target = r2(tBase * 1.002);
+      }
+      if (out.entry && out.stop && out.target) {
+        const mid = (out.entry.lo + out.entry.hi) / 2;
+        const risk = Math.abs(mid - out.stop), reward = Math.abs(out.target - mid);
+        out.rr = risk > 0 ? Math.round(reward / risk * 100) / 100 : null;
+        if (out.rr != null && out.rr < 2) V.push("盈亏比 " + out.rr + " < 2：不值当");
+      }
+      // 仓位
+      if (out.side === "long" && out.entry && out.stop) {
+        const mid = (out.entry.lo + out.entry.hi) / 2;
+        const riskPer = Math.abs(mid - out.stop);
+        const cap = plan && plan.maxShares ? Math.max(0, plan.maxShares - shares)
+          : Math.floor((principalFor(code) / price) / lot) * lot;
+        const byRisk = riskPer > 0 ? Math.floor(LB / riskPer / lot) * lot : 0;
+        out.size = Math.max(0, Math.min(byRisk, cap));
+        if (out.size < lot) V.push("按亏损预算算出的仓位不足 1 手");
+      } else if (out.side === "reduce") {
+        if (shares <= 0) V.push("当前无持仓：可看空但不做");
+        else {
+          out.size = Math.max(lot, Math.min(shares, Math.floor(shares * 0.25 / lot) * lot));
+        }
+      }
+      // 等级
+      if (V.length) out.grade = "noTrade";
+      else if (out.score >= 75) out.grade = "A";
+      else if (out.score >= 62) out.grade = "B";
+      else out.grade = "C";
+      out.confirm = out.side === "long" ? "15分 MACD/KDJ 金叉 + 放量≥1.3×" : "15分 MACD/KDJ 死叉确认";
+      out.timing = out.grade === "noTrade" ? "不交易" : out.grade === "A" ? "可执行（等确认条件）" : "观察，等确认";
+      return out;
+    }
+
+    /* ================= 信号台账：记录每张单子，事后统计胜率/期望 ================= */
+    function ledgerAdd(ledger, setup, code, nowMs) {
+      if (!ledger || !setup || setup.grade === "noTrade" || setup.side === "none") return ledger;
+      if (!ledger.records) ledger.records = [];
+      const mid = setup.entry ? (setup.entry.lo + setup.entry.hi) / 2 : null;
+      ledger.records.push({
+        id: nowMs + ":" + ledger.records.length,
+        ts: nowMs, code, side: setup.side, grade: setup.grade, score: setup.score,
+        entry: mid, stop: setup.stop, target: setup.target, rr: setup.rr,
+        size: setup.size, status: "open", result: null, retPct: null, closedTs: null
+      });
+      if (ledger.records.length > 200) ledger.records = ledger.records.slice(-200);
+      return ledger;
+    }
+
+    /** 用最新价结算：先到目标算赢，先到止损算输，超时（默认 45 分钟）算过期 */
+    function ledgerEval(ledger, code, price, nowMs, opt) {
+      if (!ledger || !ledger.records || price == null) return ledger;
+      const timeout = (opt && opt.timeoutMs) || 45 * 60 * 1000;
+      for (const r of ledger.records) {
+        if (r.status !== "open" || r.code !== code || r.entry == null) continue;
+        const long = r.side === "long";
+        const hitTarget = long ? price >= r.target : price <= r.target;
+        const hitStop = long ? price <= r.stop : price >= r.stop;
+        if (hitTarget) { r.status = "closed"; r.result = "target"; r.retPct = (r.target / r.entry - 1) * 100 * (long ? 1 : -1); r.closedTs = nowMs; }
+        else if (hitStop) { r.status = "closed"; r.result = "stop"; r.retPct = (r.stop / r.entry - 1) * 100 * (long ? 1 : -1); r.closedTs = nowMs; }
+        else if (nowMs - r.ts >= timeout) { r.status = "closed"; r.result = "expired"; r.retPct = (price / r.entry - 1) * 100 * (long ? 1 : -1); r.closedTs = nowMs; }
+      }
+      return ledger;
+    }
+
+    function ledgerStats(ledger) {
+      const out = { total: 0, closed: 0, open: 0, target: 0, stop: 0, expired: 0,
+        winRate: null, avgWin: null, avgLoss: null, expectancy: null, byGrade: {} };
+      if (!ledger || !ledger.records) return out;
+      const recs = ledger.records;
+      out.total = recs.length;
+      const wins = [], losses = [];
+      for (const r of recs) {
+        if (r.status === "open") { out.open++; continue; }
+        out.closed++;
+        if (r.result === "target") { out.target++; wins.push(r.retPct); }
+        else if (r.result === "stop") { out.stop++; losses.push(r.retPct); }
+        else out.expired++;
+        const g = out.byGrade[r.grade] || (out.byGrade[r.grade] = { n: 0, win: 0, exp: 0 });
+        g.n++;
+        if (r.result === "target") g.win++;
+        g.exp += (r.retPct || 0);
+      }
+      const decided = out.target + out.stop;
+      if (decided > 0) {
+        out.winRate = out.target / decided * 100;
+        out.avgWin = wins.length ? wins.reduce((a, b) => a + b, 0) / wins.length : 0;
+        out.avgLoss = losses.length ? losses.reduce((a, b) => a + b, 0) / losses.length : 0;
+        out.expectancy = (out.winRate / 100) * out.avgWin + (1 - out.winRate / 100) * out.avgLoss;
+      }
+      return out;
+    }
+
+/**
      * 按持仓比例分配「减仓/加仓」股数（不再一律 1 手）。
      * 减仓：近→远 25% / 35% / 剩余，整手向下取，至少 1 手；
      * 加仓：优先用「仓位上限 − 现持仓」的容量，50% / 30% / 剩余，整手。
@@ -1289,6 +1585,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     buildBars: buildBars, ema: ema, periodStats: periodStats, multiPeriod: multiPeriod,
     parseTencentSnapshot: parseTencentSnapshot, backoffDelay: backoffDelay, decodeText: decodeText,
     suggestQtys: suggestQtys, suggestPlan: suggestPlan,
+    macdCalc: macdCalc, kdjCalc: kdjCalc, volumeState: volumeState, regimeOf: regimeOf,
+    scoreSetup: scoreSetup, ledgerAdd: ledgerAdd, ledgerEval: ledgerEval, ledgerStats: ledgerStats,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
     threeDayContext: threeDayContext, shortTermPlan: shortTermPlan,
@@ -1304,7 +1602,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.8 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.9 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -1328,6 +1626,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   if (st.chartMode === "m5") st.chartMode = "5";   // 兼容旧版本存的值
   st.lastFired = st.lastFired || {};
   st.srcStats = st.srcStats || null;
+  st.ledger = st.ledger || { records: [] };
   st.eventRisk = st.eventRisk || false;
   if (st.watch.indexOf(st.code) < 0) st.watch.unshift(st.code);
 
@@ -1381,6 +1680,129 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       });
       setTimeout(function () { try { n.close(); } catch (e) {} }, 20000);
     } catch (e) {}
+  }
+
+  /* ---------- 智能信号（共识评分）与信号台账 ---------- */
+  var lastSetup = null;
+  function recordLedger(sp) {
+    if (!sp || !sp.ok) return;
+    var lg = st.ledger;
+    if (!lg) { lg = st.ledger = { records: [] }; }
+    var now = Date.now();
+    if (sp.grade === "A" || sp.grade === "B") {
+      var dup = false;
+      for (var i = 0; i < lg.records.length; i++) {
+        var r = lg.records[i];
+        if (r.code === st.code && r.side === sp.side && now - r.ts < 30 * 60 * 1000) { dup = true; break; }
+      }
+      if (!dup) { C.ledgerAdd(lg, sp, st.code, now); save({ ledger: lg }); }
+    }
+    if (metrics && metrics.price != null) {
+      C.ledgerEval(lg, st.code, metrics.price, now);
+      save({ ledger: lg });
+    }
+  }
+
+  function pctTxt(v) { return v == null ? "--" : (v > 0 ? "+" : "") + v.toFixed(2) + "%"; }
+
+  function renderSignalCard() {
+    var box = $("sigBox"), meta = $("sigMeta");
+    if (!box) return;
+    if (!metrics) { box.innerHTML = '<div class="sigwhy">等待行情…</div>'; return; }
+    var points = allPointsNow();
+    var pos = curPos(), plan = curPlan();
+    var refs = C.intradayRefs(metrics, points, pos, { code: st.code, plan: plan });
+    var sp = C.scoreSetup(metrics, mpData, ctx3Data, refs, pos, plan, { code: st.code, points: points });
+    lastSetup = sp;
+    recordLedger(sp);
+    var sideTxt = sp.side === "long" ? "偏多（找买点）" : sp.side === "reduce" ? "偏空（找减仓）" : "无方向";
+    var g = sp.grade === "noTrade" ? "N" : sp.grade;
+    var gTxt = sp.grade === "noTrade" ? "不交易" : sp.grade + " 级";
+    var html = "";
+    html += '<div class="sighead"><span class="siggrade ' + g + '">' + gTxt + '</span>' +
+      '<span class="sigscore">' + sp.score + "/100 · " + sideTxt + "</span></div>";
+    if (sp.grade === "noTrade") {
+      var vs = sp.vetoes.length ? sp.vetoes : ["条件不足"];
+      html += '<div class="sigveto">不交易原因：' + vs.join("；") + "</div>";
+    } else {
+      var mid = sp.entry ? (sp.entry.lo + sp.entry.hi) / 2 : null;
+      html += '<div class="sigline"><span>触发 <b>' + (sp.entry ? sp.entry.lo.toFixed(2) + "–" + sp.entry.hi.toFixed(2) : "--") +
+        '</b></span><span>止损 <b>' + (sp.stop == null ? "--" : sp.stop.toFixed(2)) +
+        '</b></span><span>目标 <b>' + (sp.target == null ? "--" : sp.target.toFixed(2)) +
+        '</b></span><span>盈亏比 <b>' + (sp.rr == null ? "--" : sp.rr) +
+        "</b></span><span>建议 <b>" + (sp.size || 0) + " 股</b></span></div>";
+      html += '<div class="sigwhy">确认条件：' + sp.confirm + " · " + sp.timing + "</div>";
+    }
+    if (sp.reasons.length) html += '<div class="sigwhy">依据：' + sp.reasons.slice(0, 5).join(" · ") + "</div>";
+    // 指标明细表
+    var it = '<div class="itab"><span class="ih">周期</span><span class="ih">MACD</span><span class="ih">KDJ</span><span class="ih">量价</span>';
+    [5, 15, 30, 60].forEach(function (mm) {
+      var o = sp.indicators[mm];
+      if (!o) { it += "<span>" + mm + "分</span><span class=\"n\">--</span><span class=\"n\">--</span><span class=\"n\">--</span>"; return; }
+      var macdTxt = o.macd ? "" : "不足", kdjTxt = o.kdj ? "" : "不足", vsTxt = "--";
+      var macdCls = "n", kdjCls = "n", vsCls = "n";
+      if (o && o.macd) {
+        if (o.macd.cross === "gold") { macdTxt = "金叉"; macdCls = "g"; }
+        else if (o.macd.cross === "dead") { macdTxt = "死叉"; macdCls = "d"; }
+        else if (o.macd.bull) { macdTxt = "多头"; macdCls = "g"; }
+        else { macdTxt = "空头"; macdCls = "d"; }
+        if (o.macd.divergence === "top") macdTxt += "·顶背离";
+        if (o.macd.divergence === "bottom") macdTxt += "·底背离";
+      }
+      if (o && o.kdj) {
+        if (o.kdj.cross === "gold") { kdjTxt = "金叉"; kdjCls = "g"; }
+        else if (o.kdj.cross === "dead") { kdjTxt = "死叉"; kdjCls = "d"; }
+        else if (o.kdj.zone === "over") { kdjTxt = "超买"; kdjCls = "d"; }
+        else if (o.kdj.zone === "under") { kdjTxt = "超卖"; kdjCls = "g"; }
+        else { kdjTxt = o.kdj.bull ? "偏多" : "偏空"; kdjCls = o.kdj.bull ? "g" : "d"; }
+      }
+      if (o && o.vs) {
+        vsTxt = { breakout: "放量突破", shrinkNewHigh: "缩量新高", stallHighVol: "放量滞涨", healthyPullback: "缩量回调", normal: "正常" }[o.vs] || o.vs;
+        vsCls = o.vs === "breakout" ? "g" : (o.vs === "shrinkNewHigh" || o.vs === "stallHighVol") ? "d" : "n";
+      }
+      it += '<span>' + mm + '分</span><span class="' + macdCls + '">' + macdTxt +
+        '</span><span class="' + kdjCls + '">' + kdjTxt +
+        '</span><span class="' + vsCls + '">' + vsTxt + '</span>';
+    });
+    it += "</div>";
+    html += it;
+    html += '<div class="sigwhy" style="font-size:10.5px">规则化加权评分，不是预测；A/B 级才记入台账用于统计。</div>';
+    box.innerHTML = html;
+    if (meta) meta.textContent = "共识评分";
+    renderLedgerCard();
+  }
+
+  function renderLedgerCard() {
+    var box = $("ledgerBox"), meta = $("ledgerMeta");
+    if (!box) return;
+    var lg = st.ledger || { records: [] };
+    var stt = C.ledgerStats(lg);
+    var head = "已记录 " + stt.total + " · 结算 " + stt.closed + " · 胜 " + stt.target + " / 负 " + stt.stop;
+    if (stt.winRate != null) head += " · 胜率 <b>" + stt.winRate.toFixed(1) + "%</b>";
+    if (stt.expectancy != null) head += " · 期望 <b>" + pctTxt(stt.expectancy) + "</b>/次";
+    var html = '<div class="sigwhy">' + head + "</div>";
+    var recs = lg.records.slice(-4).reverse();
+    for (var i = 0; i < recs.length; i++) {
+      var r = recs[i];
+      var d = new Date(r.ts);
+      var ts = (d.getMonth() + 1) + "/" + d.getDate() + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+      var sideT = r.side === "long" ? "多" : "减";
+      var res = r.result === "target" ? "✓ 到目标" : r.result === "stop" ? "✗ 打止损" : r.result === "expired" ? "… 超时" : "进行中";
+      var cls = r.result === "target" ? "win" : r.result === "stop" ? "loss" : "open";
+      html += '<div class="ledrow ' + cls + '"><b>' + ts + "</b> " + sideT + " " + r.grade + " 级 · 进 " +
+        (r.entry == null ? "--" : r.entry.toFixed(2)) + " 损 " + (r.stop == null ? "--" : r.stop.toFixed(2)) +
+        " 标 " + (r.target == null ? "--" : r.target.toFixed(2)) + " · " + res +
+        (r.retPct == null ? "" : "（" + pctTxt(r.retPct) + "）") + "</div>";
+    }
+    if (!recs.length) html += '<div class="sigwhy">暂无记录：出现 A/B 级信号时会自动记一条，用来统计真实胜率。</div>';
+    html += '<div><button class="ledclear" id="btnLedgerClear">清空台账</button></div>';
+    box.innerHTML = html;
+    var bc = $("btnLedgerClear");
+    if (bc) bc.addEventListener("click", function () {
+      if (!confirm("清空所有台账记录？（统计会归零）")) return;
+      st.ledger = { records: [] }; save({ ledger: st.ledger }); renderLedgerCard();
+    });
+    if (meta) meta.textContent = "本机统计";
   }
 
   /* ---------- 提醒弹窗 ---------- */
@@ -1967,6 +2389,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         mpData = C.multiPeriod(allPts);
         ctx3Data = C.threeDayContext(allPts, 3);
         render(metrics, p.points);
+        try { renderSignalCard(); } catch (e) { /* 指标不足时不阻塞行情 */ }
         if (historyCode !== requested || !historyPoints || Date.now() - historyAt > 180000) {
           fetchHistory(requested).then(function (pts) {
             if (!pts || !pts.length || requested !== st.code) return;
