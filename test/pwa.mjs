@@ -623,5 +623,77 @@ ok("评分：返回 wash 检测结果", !!spDist.wash && spDist.wash.verdict ===
 ok("页面含洗盘/出货检测卡片", html.includes("washBox") && html.includes("洗盘 / 出货检测"));
 ok("渲染：洗盘/出货卡片有内容", h1.deep("washBox").length > 10, h1.deep("washBox").slice(0, 60));
 
+
+/* ---------- 17) 日线 / 盘口 / ATR / 大盘 RS ---------- */
+console.log("\n[日线/盘口/ATR/大盘]");
+ok("导出四个新函数", !!(C.parseTencentKline && C.dailyTrend && C.atrCalc && C.orderBookStats));
+
+const kjson = { data: { sh600418: { day: [
+  ["2026-10-15", "22.00", "21.50", "22.10", "21.40", "1000"],
+  ["2026-10-16", "21.60", "22.37", "22.50", "21.55", "1200"],
+  ["2026-10-19", "23.00", "21.98", "23.60", "21.90", "1884514"]
+] } } };
+const kl = C.parseTencentKline(kjson, "sh600418");
+ok("日K解析：3 根，字段对（收/高/低/量）", kl.ok && kl.bars.length === 3 &&
+  kl.bars[2].c === 21.98 && kl.bars[2].h === 23.6 && kl.bars[2].l === 21.9 && kl.bars[2].v === 1884514, kl.bars[2]);
+
+function mkDaily(n, step) {
+  const arr = [];
+  let p = 100;
+  for (let i = 0; i < n; i++) {
+    p += step;
+    arr.push({ date: "2026-01-" + String((i % 28) + 1).padStart(2, "0"), o: p, c: p, h: p + 0.5, l: p - 0.5, v: 1000 });
+  }
+  return arr;
+}
+const dyUp = C.dailyTrend(mkDaily(80, 0.2));
+ok("日线：上升 → 趋势向上", dyUp.ok && dyUp.trend === "up", [dyUp.trend, dyUp.ma20 && dyUp.ma20.toFixed(2)]);
+const dyDown = C.dailyTrend(mkDaily(80, -0.2));
+ok("日线：下跌 → 趋势向下", dyDown.ok && dyDown.trend === "down", dyDown.trend);
+ok("日线：返回 20/60 日高低与 MACD/KDJ", dyUp.high20 != null && dyUp.high60 != null && !!dyUp.macd && !!dyUp.kdj);
+
+const atrBars = [];
+for (let i = 0; i < 20; i++) atrBars.push({ o: 100, c: 100, h: 101, l: 99, v: 100 });
+ok("ATR：区间 2 的横盘 → ATR=2", Math.abs(C.atrCalc(atrBars, 14) - 2) < 1e-9, C.atrCalc(atrBars, 14));
+
+const obQuote = {
+  outer: 1200, inner: 1000,
+  bids: [{ p: 21.97, v: 300 }, { p: 21.96, v: 200 }, { p: 21.95, v: 100 }, { p: 21.94, v: 100 }, { p: 21.93, v: 100 }],
+  asks: [{ p: 21.98, v: 100 }, { p: 21.99, v: 100 }, { p: 22.0, v: 200 }, { p: 22.01, v: 100 }, { p: 22.02, v: 100 }],
+  turnoverRate: 8.36, limitUp: 24.61, limitDown: 20.13
+};
+const ob = C.orderBookStats(obQuote);
+ok("盘口：委比计算（买 800 vs 卖 600 → +14.3%）", ob.ok && Math.abs(ob.imbalance - 14.2857) < 0.01, ob.imbalance);
+ok("盘口：外/内盘比 1.2", Math.abs(ob.buySellRatio - 1.2) < 1e-9, ob.buySellRatio);
+ok("盘口：换手率与涨跌停价", ob.turnoverRate === 8.36 && ob.limitUp === 24.61 && ob.limitDown === 20.13, ob);
+
+// 集成：日线向下 → 否决做多
+const bullPts = synth(3, 240, 0.03);
+const bullM = { price: bullPts[bullPts.length - 1].price, prevClose: 100, high: 110, low: 95, vwap: 105, vwapDevPct: 0.5, volRatio: 1.1 };
+const bullRefs = C.intradayRefs(bullM, bullPts, { shares: 0, cost: 0 }, { code: "sh603083", plan: null });
+const bullMp = C.multiPeriod(bullPts);
+const spDailyDown = C.scoreSetup(bullM, bullMp, null, bullRefs, { shares: 0, cost: 0 }, null,
+  { code: "sh603083", points: bullPts, daily: dyDown });
+ok("集成：日线向下 → 否决『不逆势做多』", spDailyDown.vetoes.some((v) => v.indexOf("不逆势做多") >= 0), spDailyDown.vetoes);
+const spDailyUp = C.scoreSetup(bullM, bullMp, null, bullRefs, { shares: 0, cost: 0 }, null,
+  { code: "sh603083", points: bullPts, daily: dyUp });
+ok("集成：日线向上 → 理由含『日线趋势向上』", spDailyUp.reasons.some((r) => r.indexOf("日线趋势向上") >= 0), spDailyUp.reasons.slice(0, 6));
+
+// ATR 止损模式
+ok("集成：ATR 止损模式生效", spDailyUp.stopMode === "15分ATR×1.5" || spDailyUp.stopMode === "5分ATR×2.5", spDailyUp.stopMode);
+ok("集成：ATR 数值返回", spDailyUp.atr && spDailyUp.atr.atr > 0, spDailyUp.atr);
+if (spDailyUp.entry && spDailyUp.stop != null) {
+  const mid = (spDailyUp.entry.lo + spDailyUp.entry.hi) / 2;
+  const d = Math.abs(spDailyUp.stop / mid - 1) * 100;
+  ok("集成：止损距离被限制在 0.8%–6%", d >= 0.79 && d <= 6.01, d.toFixed(2) + "%");
+}
+
+// 盘口与大权重接入：委比强 + 大盘弱
+const spBook = C.scoreSetup(bullM, bullMp, null, bullRefs, { shares: 0, cost: 0 }, null,
+  { code: "sh603083", points: bullPts, order: ob, stockPct: 1.2, indexPct: -0.5 });
+ok("集成：委比/大盘 RS 进入理由", spBook.reasons.some((r) => r.indexOf("委比") >= 0) || spBook.reasons.some((r) => r.indexOf("强于大盘") >= 0), spBook.reasons.slice(0, 8));
+
+ok("页面含日线/盘口/大盘卡片", html.includes("macroBox") && html.includes("日线 / 盘口 / 大盘"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
