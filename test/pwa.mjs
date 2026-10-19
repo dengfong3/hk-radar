@@ -714,13 +714,29 @@ const lists = {
   ]
 };
 const ranked = C.rankPoolCandidates(lists, { limit: 10 });
-ok("观察池：返回候选且数量不超过上限", ranked.ok && ranked.picks.length === 5, ranked.picks.length);
+ok("观察池：返回候选且数量不超过上限（涨停股被剔除）", ranked.ok && ranked.picks.length === 4, ranked.picks.length);
 ok("观察池：按分数降序", ranked.picks.every((p, i, arr) => i === 0 || arr[i - 1].score >= p.score), ranked.picks.map((p) => p.score));
 const first = ranked.picks[0];
 ok("观察池：资金王排第一（主力净流入+温和上涨+收盘高位）", first.code === "sh600487", first.code + " " + first.score);
-ok("观察池：涨停股带风险标注", ranked.picks.some((p) => p.code === "sz301119" && p.risks.some((r) => r.indexOf("涨停") >= 0)), ranked.picks.map((p) => [p.code, p.risks]));
+ok("观察池：涨停股被直接剔除", !ranked.picks.some((p) => p.code === "sz301119"), ranked.picks.map((p) => p.code));
+ok("观察池：目标区间随板块（主板5/创业8）", ranked.picks.every((p) => p.targetBand === 5 || p.targetBand === 8), ranked.picks.map((p) => [p.code, p.targetBand]));
 ok("观察池：主力净流出带风险标注", ranked.picks.some((p) => p.code === "sh600825" && p.risks.some((r) => r.indexOf("净流出") >= 0)));
 ok("观察池：空数据 → ok=false", C.rankPoolCandidates({}, {}).ok === false);
+
+// 目标涨跌幅：主板 ±5%、双创 ±8%、ST ±2.5%
+ok("目标：主板 5%", C.poolTargetOf("sh600519", "贵州茅台").target === 5, C.poolTargetOf("sh600519", "贵州茅台"));
+ok("目标：创业板 8%", C.poolTargetOf("sz300750", "宁德时代").target === 8, C.poolTargetOf("sz300750", "宁德时代"));
+ok("目标：科创板 8%", C.poolTargetOf("sh688981", "中芯国际").target === 8);
+ok("目标：ST 股 2.5%", C.poolTargetOf("sh600xxx", "*ST某某").target === 2.5, C.poolTargetOf("sh600xxx", "*ST某某"));
+
+// 跌停/涨停剔除 + 跌幅入选
+const mkP = (code, name, chg, price, hi, lo, vr, to, flow, fp) => ({ code, name, price, chgPct: chg, high: hi, low: lo, volRatio: vr, turnover: to, flowAmt: flow, flowPct: fp });
+const edge = C.rankPoolCandidates({
+  up: [mkP("sh600001", "涨停股", 10.0, 20, 20, 18, 2, 5, 1e8, 8), mkP("sh600002", "跌停股", -10.0, 16, 18, 16, 2, 5, 1e8, 8)],
+  down: [mkP("sh600003", "回调股", -5.0, 19, 21, 18.5, 1.8, 4, 8e7, 7)]
+}, { limit: 10 });
+ok("剔除：涨停/跌停都不进池", edge.picks.length === 1 && edge.picks[0].code === "sh600003", edge.picks.map((p) => p.code));
+ok("跌幅 -5%：标记为回调型", edge.picks[0].dir === "down" && edge.picks[0].reasons.some((r) => r.indexOf("回调型") >= 0), edge.picks[0].reasons);
 
 const batch = 'v_sh600487="1~\u8d44\u91d1\u738b~600487~22.00~21.00~21.50~1.0~0~0~21.99~100~21.98~100~0~0~0~0~0~0~22.01~100~22.02~100~0~0~0~0~0~0~20261019150000~1.00~5.00~22.20~20.50~22.00/1/2~1~2~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0";\nv_sz300502="1~\u8d44\u91d1\u6b21~300502~94.00~95.00~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0";';
 const quotes = C.parseBatchSnapshot(batch);
