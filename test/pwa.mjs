@@ -973,5 +973,16 @@ await new Promise((r) => setTimeout(r, 200));
 ok("渲染：更新时间显示为本地时间", h8.txt("planSummary").indexOf(planExp) >= 0, h8.txt("planSummary"));
 ok("渲染：标注（本地时间）", h8.txt("planSummary").indexOf("本地时间") >= 0);
 
+
+/* ---------- 26) 卡片顺序 ---------- */
+console.log("\n[卡片顺序]");
+ok("多周期节奏 → 智能信号 → 洗盘/出货 → 日线/盘口/大盘",
+  html.indexOf('id="mp"') < html.indexOf('id="sigBox"') &&
+  html.indexOf('id="sigBox"') < html.indexOf('id="washBox"') &&
+  html.indexOf('id="washBox"') < html.indexOf('id="macroBox"'),
+  [html.indexOf('id="mp"'), html.indexOf('id="sigBox"'), html.indexOf('id="washBox"'), html.indexOf('id="macroBox"')]);
+ok("智能信号/洗盘 排在观察池与简报之前",
+  html.indexOf('id="washBox"') < html.indexOf('id="poolBox"') &&
+  html.indexOf('id="washBox"') < html.indexOf('id="briefBox"'));
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

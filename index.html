@@ -254,6 +254,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 </div>
 
 <div class="card">
+  <div class="card-title"><b>智能信号</b><span class="sp"></span><span id="sigMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="sigBox"></div>
+</div>
+
+<div class="card">
+  <div class="card-title"><b>洗盘 / 出货检测</b><span class="sp"></span><span id="washMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="washBox"></div>
+</div>
+
+<div class="card">
   <div class="card-title"><b>日线 / 盘口 / 大盘</b><span class="sp"></span><span id="macroMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="macroBox"></div>
 </div>
@@ -266,16 +276,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 <div class="card">
   <div class="card-title"><b>每日简报</b><span class="sp"></span><span id="briefMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="briefBox"></div>
-</div>
-
-<div class="card">
-  <div class="card-title"><b>智能信号</b><span class="sp"></span><span id="sigMeta" style="font-size:10px"></span></div>
-  <div class="sigbox" id="sigBox"></div>
-</div>
-
-<div class="card">
-  <div class="card-title"><b>洗盘 / 出货检测</b><span class="sp"></span><span id="washMeta" style="font-size:10px"></span></div>
-  <div class="sigbox" id="washBox"></div>
 </div>
 
 <div class="card">
@@ -1715,7 +1715,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     /* ================= 每日简报：盘前 / 午间 / 盘后 ================= */
 
 
-
     /** ISO(UTC) 时间 → 本地时间显示（避免直接截取 UTC 字符串导致差 8 小时） */
     function fmtLocalTime(iso) {
       if (!iso) return "";
@@ -2485,7 +2484,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.24 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.25 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
