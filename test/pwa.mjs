@@ -818,5 +818,39 @@ ok("渲染：台账显示股票代码（06166.HK）", ledTxt.indexOf("06166.HK")
 ok("渲染：台账显示股票名（腾讯控股/拓斯达）", ledTxt.indexOf("腾讯控股") >= 0 && ledTxt.indexOf("拓斯达") >= 0, ledTxt.slice(0, 200));
 ok("渲染：多股票时出现分股统计", ledTxt.indexOf("分股统计") >= 0, ledTxt.slice(0, 300));
 
+
+/* ---------- 21) 计划生成升级：ATR 止损 / 日线关键位 / 风险预算 / 本金 ---------- */
+console.log("\n[计划生成升级]");
+const planPts = synth(3, 240, 0.02);
+const planM = { price: 100, prevClose: 100, high: 103, low: 98, vwap: 100.5, vwapDevPct: 0.5, volRatio: 1.1 };
+const planRefs = C.intradayRefs(planM, planPts, { shares: 0, cost: 0 }, { code: "sh603083", plan: null });
+const planMp = C.multiPeriod(planPts);
+
+const spBase = C.suggestPlan(planM, planRefs, planMp, null, { shares: 0, cost: 0 }, "sh603083", { points: planPts });
+ok("计划：ATR 止损模式生效", (spBase.stopMode || "").indexOf("ATR") >= 0 && spBase.atr > 0, [spBase.stopMode, spBase.atr]);
+ok("计划：止损低于现价", spBase.reds[0].at < 100, spBase.reds[0].at);
+ok("计划：返回满仓与预算两个上限", spBase.fullPos > 0 && spBase.riskCap >= 0, [spBase.fullPos, spBase.riskCap]);
+ok("计划：仓位上限 = min(满仓, 预算)", spBase.maxShares === Math.min(spBase.fullPos, spBase.riskCap), [spBase.maxShares, spBase.fullPos, spBase.riskCap]);
+
+// 本金参数
+const spCap = C.suggestPlan(planM, planRefs, planMp, null, { shares: 0, cost: 0 }, "sh603083", { points: planPts, capital: 50000 });
+ok("计划：本金 5 万时满仓上限 = 500 股", spCap.fullPos === 500, spCap.fullPos);
+ok("计划：本金变大 → 满仓上限变大", spCap.fullPos > spBase.fullPos, [spCap.fullPos, spBase.fullPos]);
+
+// 预算反推
+const spTiny = C.suggestPlan(planM, planRefs, planMp, null, { shares: 0, cost: 0 }, "sh603083", { points: planPts, budget: 100 });
+ok("计划：预算 100 元 → 允许仓位 0 股", spTiny.riskCap === 0 && spTiny.maxShares === 0, [spTiny.riskCap, spTiny.maxShares]);
+
+// 日线关键位并入减仓档
+const dyPlan = { ok: true, ma20: 105, ma60: 108, high20: 106, high60: 112, low20: 95, low60: 90, trend: "flat" };
+const spDaily = C.suggestPlan(planM, planRefs, planMp, null, { shares: 0, cost: 0 }, "sh603083", { points: planPts, daily: dyPlan });
+const whys = spDaily.takes.map((t) => t.why).join(",");
+ok("计划：日线关键位进入减仓档", whys.indexOf("日线") >= 0 || whys.indexOf("20日") >= 0 || whys.indexOf("60日") >= 0, whys);
+
+// scoreSetup 使用本金参数
+const tinyCapSp = C.scoreSetup(planM, planMp, null, planRefs, { shares: 0, cost: 0 }, null,
+  { code: "sh603083", points: planPts, capital: 1000 });
+ok("评分：本金过小 → 仓位 0 且否决", tinyCapSp.size === 0 && tinyCapSp.vetoes.some((v) => v.indexOf("仓位不足") >= 0 || v.indexOf("1 手") >= 0), [tinyCapSp.size, tinyCapSp.vetoes]);
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
