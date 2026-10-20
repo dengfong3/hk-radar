@@ -1714,6 +1714,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
     /* ================= 每日简报：盘前 / 午间 / 盘后 ================= */
 
+
+    /** 简报存储键：日期 + 代码（避免切换股票串数据） */
+    function briefKey(day, code) {
+      return String(day || "") + " " + String(code || "");
+    }
     /** 各市场的简报时间点（分钟）：盘前截止 09:00、午间 11:30/12:00、盘后 15:02/16:02 */
     function briefDeadlines(code) {
       const mk = marketOf(code);
@@ -2449,6 +2454,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     poolHistoryLines: poolHistoryLines,
     poolTargetOf: poolTargetOf,
     buildBrief: buildBrief, sessionPhase: sessionPhase, briefDeadlines: briefDeadlines, segmentStats: segmentStats, prevDailyBar: prevDailyBar,
+    briefKey: briefKey,
     parseSinaRank: parseSinaRank,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
@@ -2465,7 +2471,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.20 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.21 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2712,8 +2718,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   function ensureBriefs() {
     if (!dailyData || !dailyData.ok || !metrics) return;
     var tk = todayKey();
+    var bk = C.briefKey(tk, st.code);
     st.briefs = st.briefs || {};
-    var day = st.briefs[tk] || (st.briefs[tk] = {});
+    // 清理旧格式（只有日期、没有代码）的键，避免串数据
+    Object.keys(st.briefs).forEach(function (k) { if (k.indexOf(" ") < 0) delete st.briefs[k]; });
+    var day = st.briefs[bk] || (st.briefs[bk] = {});
     var ph = C.sessionPhase(new Date(), st.code);
     if (!ph.ok) return;
     var points = allPointsNow();
@@ -2736,7 +2745,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (changed) {
       // 只保留最近 5 天
       var keys = Object.keys(st.briefs).sort();
-      while (keys.length > 5) { delete st.briefs[keys.shift()]; }
+      while (keys.length > 20) { delete st.briefs[keys.shift()]; }
       save({ briefs: st.briefs });
       renderBriefCard();
     }
@@ -2763,13 +2772,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var box = $("briefBox"), meta = $("briefMeta");
     if (!box) return;
     var tk = todayKey();
-    var day = (st.briefs && st.briefs[tk]) || {};
+    var day = (st.briefs && st.briefs[C.briefKey(tk, st.code)]) || {};
     var ph = C.sessionPhase(new Date(), st.code);
     var html = "";
     function block(key, title, readyBy) {
       var it = day[key];
       var stateTxt = it ? "已生成 " + new Date(it.at).toTimeString().slice(0, 5) : "待生成（" + readyBy + " 前自动）";
-      html += '<div class="washrow"><span class="lw">' + title + "</span><span>" + stateTxt + "</span></div>";
+      html += '<div class="washrow"><span class="lw">' + title + " · " + C.displayCode(st.code) + "</span><span>" + stateTxt + "</span></div>";
       if (it) html += briefHtml(it.brief);
     }
     block("preopen", "盘前策略", "09:00");
@@ -2785,7 +2794,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var btn = $("btnBriefRefresh");
     if (btn) btn.addEventListener("click", function () {
       var tk2 = todayKey();
-      if (st.briefs) delete st.briefs[tk2];
+      if (st.briefs) delete st.briefs[C.briefKey(tk2, st.code)];
       save({ briefs: st.briefs });
       ensureBriefs();
       renderBriefCard();
@@ -3803,6 +3812,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     $("codeInput").value = C.displayCode(code);
     renderChips(); renderPlanSummary(); bindPosInputs();
     $("px").textContent = "读取中…"; $("px").className = "px flat"; $("chg").textContent = C.displayCode(code);
+    try { renderBriefCard(); } catch (e) {}
     tick(true);
   }
 
@@ -3973,6 +3983,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   st.srcStats = st.srcStats || { since: C.todayStr(), tencent: 0, eastmoney: 0, snapshot: 0, fail: 0, downMs: 0 };
   $("footHealth").textContent = C.srcHealthText(st.srcStats);
   try { verifyPools(); renderPoolCard(); } catch (e) {}
+  // 清理旧格式简报键（只有日期没有代码），并按当前股票渲染
+  (function () {
+    st.briefs = st.briefs || {};
+    var dirty = false;
+    Object.keys(st.briefs).forEach(function (k) { if (k.indexOf(" ") < 0) { delete st.briefs[k]; dirty = true; } });
+    if (dirty) save({ briefs: st.briefs });
+    try { renderBriefCard(); } catch (e) {}
+  })();
   $("btnForce").addEventListener("click", function () {
     $("btnForce").textContent = "更新中…";
     try {

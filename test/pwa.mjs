@@ -901,5 +901,33 @@ ok("盘后简报：给出明日动作", postB.actions.length >= 3 && postB.actio
 ok("盘后简报：带风险管理提示", postB.risks.length > 0, postB.risks);
 ok("页面含每日简报卡片", html.includes("briefBox") && html.includes("每日简报"));
 
+
+/* ---------- 23) 简报按股票隔离 ---------- */
+console.log("\n[简报按股票隔离]");
+ok("导出 briefKey", typeof C.briefKey === "function");
+ok("briefKey = 日期 + 代码", C.briefKey("2026-10-20", "sz300607") === "2026-10-20 sz300607", C.briefKey("2026-10-20", "sz300607"));
+
+const todayK = C.todayStr();
+const briefA = { ok: true, kind: "preopen", title: "盘前", summary: "AA股数据", lines: [], levels: { sup: [], res: [] }, actions: [], risks: [] };
+const briefB = { ok: true, kind: "preopen", title: "盘前", summary: "BB股数据", lines: [], levels: { sup: [], res: [] }, actions: [], risks: [] };
+const seededBriefs = {};
+seededBriefs[C.briefKey(todayK, "sz300607")] = { preopen: { at: Date.now(), brief: briefA } };
+seededBriefs[C.briefKey(todayK, "sh600418")] = { preopen: { at: Date.now(), brief: briefB } };
+seededBriefs[todayK] = { preopen: { at: Date.now(), brief: briefB } };   // 旧格式（应被清理/忽略）
+
+const h7 = makeHarness(
+  { code: "sz300607", watch: ["sz300607", "sh600418"], sound: false, chartMode: "min", pos: {}, plans: {}, trade: {}, lastFired: {},
+    pools: [], srcStats: null, ledger: { records: [] }, capital: {}, briefs: seededBriefs },
+  () => null, { snapshotOnly: false });
+let threw7 = null;
+try { h7.run(coreSrc); h7.run(uiSrc); } catch (e) { threw7 = e; }
+ok("渲染：简报隔离场景无异常", !threw7, threw7 && threw7.message);
+await new Promise((r) => setTimeout(r, 250));
+const bt = h7.deep("briefBox");
+ok("渲染：只显示当前股票的简报（AA股数据）", bt.indexOf("AA股数据") >= 0, bt.slice(0, 200));
+ok("渲染：不显示其它股票的简报（BB股数据）", bt.indexOf("BB股数据") < 0, bt.slice(0, 200));
+ok("渲染：标题带股票代码", bt.indexOf("300607") >= 0, bt.slice(0, 120));
+ok("渲染：旧格式键被清理", (function () { const saved = h7.saved(); const keys = Object.keys(saved.briefs || {}); return keys.indexOf(todayK) < 0; })());
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
