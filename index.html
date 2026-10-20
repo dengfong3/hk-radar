@@ -1722,8 +1722,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     /** 各市场的简报时间点（分钟）：盘前截止 09:00、午间 11:30/12:00、盘后 15:02/16:02 */
     function briefDeadlines(code) {
       const mk = marketOf(code);
-      if (mk === "cn") return { preopen: 9 * 60, midday: 11 * 60 + 30, postclose: 15 * 60 + 2, close: 15 * 60, morningLen: 120, sessionLen: 240 };
-      if (mk === "hk") return { preopen: 9 * 60, midday: 12 * 60, postclose: 16 * 60 + 2, close: 16 * 60, morningLen: 150, sessionLen: 330 };
+      const open = 9 * 60 + 30;          // A 股/港股都是 09:30 开市
+      // 盘前：开市前 5 分钟（09:25）；午间：上午收市后 2 分钟；盘后：收市后 2 分钟
+      if (mk === "cn") return { open, preopen: open - 5, midday: 11 * 60 + 32, postclose: 15 * 60 + 2, close: 15 * 60, morningLen: 120, sessionLen: 240 };
+      if (mk === "hk") return { open, preopen: open - 5, midday: 12 * 60 + 2, postclose: 16 * 60 + 2, close: 16 * 60, morningLen: 150, sessionLen: 330 };
       return null;
     }
     function sessionPhase(now, code) {
@@ -2471,7 +2473,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.21 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.22 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2727,7 +2729,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (!ph.ok) return;
     var points = allPointsNow();
     var changed = false;
-    if (!day.preopen) {
+    if (!day.preopen && ph.mins >= ph.dl.preopen) {
       var b1 = C.buildBrief("preopen", { code: st.code, m: metrics, daily: dailyData, points: points });
       if (b1.ok) { day.preopen = { at: Date.now(), brief: b1 }; changed = true; }
     }
@@ -2781,11 +2783,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       html += '<div class="washrow"><span class="lw">' + title + " · " + C.displayCode(st.code) + "</span><span>" + stateTxt + "</span></div>";
       if (it) html += briefHtml(it.brief);
     }
-    block("preopen", "盘前策略", "09:00");
-    block("midday", "午间简报（上午分析 + 下午策略）", "11:32");
-    block("postclose", "盘后总结（+ 明日策略）", "15:02");
+    var an = ph.ok && ph.market === "hk";
+    block("preopen", "盘前策略", "09:25（开盘前 5 分钟）");
+    block("midday", "午间简报（上午分析 + 下午策略）", an ? "12:02" : "11:32");
+    block("postclose", "盘后总结（+ 明日策略）", an ? "16:02" : "15:02");
     if (ph.ok) {
-      html += '<div class="sigwhy" style="font-size:10.5px">当前阶段：' +
+      html += '<div class="sigwhy" style="font-size:10.5px">简报时间：开盘前 5 分钟（09:25）· ' +
+      (ph.ok && ph.market === "hk" ? "午间 12:02 / 盘后 16:02（港股）" : "午间 11:32 / 盘后 15:02（A 股）") +
+      "</div>";
+    html += '<div class="sigwhy" style="font-size:10.5px">当前阶段：' +
         ({ preopen: "开盘前", session: "盘中", midday: "午间", postclose: "盘后" })[ph.phase] +
         " · 简报按时间点自动生成，可手动刷新。</div>";
     }

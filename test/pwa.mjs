@@ -929,5 +929,21 @@ ok("渲染：不显示其它股票的简报（BB股数据）", bt.indexOf("BB股
 ok("渲染：标题带股票代码", bt.indexOf("300607") >= 0, bt.slice(0, 120));
 ok("渲染：旧格式键被清理", (function () { const saved = h7.saved(); const keys = Object.keys(saved.briefs || {}); return keys.indexOf(todayK) < 0; })());
 
+
+/* ---------- 24) 简报时间点：按市场（开市前5分钟 / 收市后2分钟） ---------- */
+console.log("\n[简报时间点]");
+const dlCn = C.briefDeadlines("sz300607");
+ok("A股：盘前 09:25 / 午间 11:32 / 盘后 15:02",
+  dlCn.preopen === 9 * 60 + 25 && dlCn.midday === 11 * 60 + 32 && dlCn.postclose === 15 * 60 + 2, dlCn);
+const dlHk = C.briefDeadlines("hk06166");
+ok("港股：盘前 09:25 / 午间 12:02 / 盘后 16:02",
+  dlHk.preopen === 9 * 60 + 25 && dlHk.midday === 12 * 60 + 2 && dlHk.postclose === 16 * 60 + 2, dlHk);
+ok("A股 11:31 仍在盘中（未到午间）", C.sessionPhase(new Date(2026, 9, 20, 11, 31), "sz300607").phase === "session");
+ok("A股 11:32 → 午间", C.sessionPhase(new Date(2026, 9, 20, 11, 32), "sz300607").phase === "midday");
+ok("港股 12:01 仍在盘中", C.sessionPhase(new Date(2026, 9, 20, 12, 1), "hk06166").phase === "session");
+ok("港股 12:03 → 午间", C.sessionPhase(new Date(2026, 9, 20, 12, 3), "hk06166").phase === "midday");
+ok("港股 16:03 → 盘后", C.sessionPhase(new Date(2026, 9, 20, 16, 3), "hk06166").phase === "postclose");
+ok("A股 15:03 → 盘后", C.sessionPhase(new Date(2026, 9, 20, 15, 3), "sz300607").phase === "postclose");
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
