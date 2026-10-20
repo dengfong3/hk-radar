@@ -852,5 +852,54 @@ const tinyCapSp = C.scoreSetup(planM, planMp, null, planRefs, { shares: 0, cost:
   { code: "sh603083", points: planPts, capital: 1000 });
 ok("评分：本金过小 → 仓位 0 且否决", tinyCapSp.size === 0 && tinyCapSp.vetoes.some((v) => v.indexOf("仓位不足") >= 0 || v.indexOf("1 手") >= 0), [tinyCapSp.size, tinyCapSp.vetoes]);
 
+
+/* ---------- 22) 每日简报（盘前 / 午间 / 盘后） ---------- */
+console.log("\n[每日简报]");
+ok("导出简报函数", !!(C.buildBrief && C.sessionPhase && C.briefDeadlines && C.segmentStats && C.prevDailyBar));
+const phPre = C.sessionPhase(new Date(2026, 9, 20, 8, 0, 0), "sz300607");
+const phSes = C.sessionPhase(new Date(2026, 9, 20, 10, 0, 0), "sz300607");
+const phMid = C.sessionPhase(new Date(2026, 9, 20, 11, 32, 0), "sz300607");
+const phPost = C.sessionPhase(new Date(2026, 9, 20, 15, 5, 0), "sz300607");
+ok("阶段：08:00 → 开盘前", phPre.phase === "preopen", phPre.phase);
+ok("阶段：10:00 → 盘中", phSes.phase === "session", phSes.phase);
+ok("阶段：11:32 → 午间", phMid.phase === "midday", phMid.phase);
+ok("阶段：15:05 → 盘后", phPost.phase === "postclose", phPost.phase);
+ok("阶段：港股 12:30 → 午间", C.sessionPhase(new Date(2026, 9, 20, 12, 30, 0), "hk06166").phase === "midday");
+ok("阶段：美股不支持", C.sessionPhase(new Date(2026, 9, 20, 10, 0, 0), "usAAPL").ok === false);
+
+// 分钟点构造：上午 120 点，价格从 100 涨到 104
+const bPts = [];
+for (let i = 0; i < 240; i++) bPts.push({ date: C.todayStr(), slot: i, price: 100 + i * 0.0167, volInc: 100 + (i % 3) * 20 });
+const segM = C.segmentStats(bPts, 0, 119);
+ok("区间统计：上午高低/均价/量", segM.n === 120 && segM.hi > 101.5 && segM.lo >= 99.9 && segM.vwap > 100.5, [segM.n, segM.hi, segM.lo, segM.vwap]);
+
+const today = C.todayStr();
+const yBar = { date: "2026-10-19", o: 100, h: 105, l: 98, c: 102, v: 1000 };
+const tBar = { date: today, o: 102, h: 104, l: 101, c: 103, v: 800 };
+const dailyB = { ok: true, trend: "down", ma20: 95, ma60: 100, low20: 80, high20: 110, low60: 70, high60: 120,
+  macd: { cross: "dead", bull: false }, kdj: { zone: "mid" }, lastBars: [yBar, tBar], note: "" };
+ok("昨日日线：取今天之前最后一根", (function () { const b = C.prevDailyBar(dailyB, today); return b && b.date === "2026-10-19" && b.c === 102; })());
+
+const preB = C.buildBrief("preopen", { code: "sz300607", daily: dailyB, points: bPts, m: { price: 103, changePct: 1.0 } });
+ok("盘前简报：生成成功且有内容", preB.ok && preB.summary.length > 5 && preB.lines.length >= 2, preB.summary);
+ok("盘前简报：给出支撑与压力", preB.levels.sup.length > 0 && preB.levels.res.length > 0, [preB.levels.sup, preB.levels.res]);
+ok("盘前简报：有条件化动作", preB.actions.length >= 3 && preB.actions.every((a) => a.cond && a.act), preB.actions.length);
+ok("盘前简报：空头趋势提示反弹减仓", preB.actions.some((a) => a.act.indexOf("减仓") >= 0), preB.actions);
+
+const midB = C.buildBrief("midday", { code: "sz300607", m: { price: 103.9, changePct: 3.9, prevClose: 100, turnover: 5e8 }, points: bPts, indexPct: 0.3 });
+ok("午间简报：含上午涨跌与位置", midB.ok && midB.summary.indexOf("上午") >= 0, midB.summary);
+ok("午间简报：含下午方向动作", midB.actions.length >= 2 && midB.actions.some((a) => a.cond.indexOf("13:00") >= 0 || a.cond.indexOf("14:30") >= 0), midB.actions);
+
+const postB = C.buildBrief("postclose", { code: "sz300607", m: { price: 103.9, changePct: 3.9, prevClose: 100, turnover: 9e8 },
+  daily: dailyB, points: bPts,
+  wash: { ok: true, summary: "洗盘特征 3/5 · 出货特征 1/5 → 倾向洗盘" },
+  setup: { ok: true, grade: "noTrade", score: 48, vetoes: ["震荡区：不交易"] },
+  atr: 0.5, ledger: { today: "今日信号 1 条" } });
+ok("盘后简报：含今日涨跌与收盘位置", postB.ok && postB.summary.indexOf("今日") >= 0, postB.summary);
+ok("盘后简报：含系统评分/洗盘结论", postB.lines.some((l) => l.v.indexOf("倾向洗盘") >= 0) && postB.lines.some((l) => l.k === "系统评分"), postB.lines);
+ok("盘后简报：给出明日动作", postB.actions.length >= 3 && postB.actions.some((a) => a.act.indexOf("减仓") >= 0 || a.act.indexOf("低吸") >= 0), postB.actions);
+ok("盘后简报：带风险管理提示", postB.risks.length > 0, postB.risks);
+ok("页面含每日简报卡片", html.includes("briefBox") && html.includes("每日简报"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

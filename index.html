@@ -264,6 +264,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 </div>
 
 <div class="card">
+  <div class="card-title"><b>每日简报</b><span class="sp"></span><span id="briefMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="briefBox"></div>
+</div>
+
+<div class="card">
   <div class="card-title"><b>智能信号</b><span class="sp"></span><span id="sigMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="sigBox"></div>
 </div>
@@ -1450,6 +1455,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         else if (out.close < out.ma20 && out.ma20 < out.ma60) out.trend = "down";
         else out.trend = "flat";
       } else if (out.ma20 != null) out.trend = out.close > out.ma20 ? "up" : "down";
+      out.lastBars = bars.slice(-5);
       out.note = "日线 " + out.bars + " 根 · MA20 " + (out.ma20 == null ? "--" : out.ma20.toFixed(2)) +
         " · MA60 " + (out.ma60 == null ? "--" : out.ma60.toFixed(2)) + " · 趋势" +
         ({ up: "向上", down: "向下", flat: "震荡" })[out.trend];
@@ -1702,6 +1708,236 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         out.avgPct = out.rows.reduce((s, x) => s + x.chgPct, 0) / out.n;
         out.hitRate = out.up / out.n * 100;
       }
+      return out;
+    }
+
+
+    /* ================= 每日简报：盘前 / 午间 / 盘后 ================= */
+
+    /** 各市场的简报时间点（分钟）：盘前截止 09:00、午间 11:30/12:00、盘后 15:02/16:02 */
+    function briefDeadlines(code) {
+      const mk = marketOf(code);
+      if (mk === "cn") return { preopen: 9 * 60, midday: 11 * 60 + 30, postclose: 15 * 60 + 2, close: 15 * 60, morningLen: 120, sessionLen: 240 };
+      if (mk === "hk") return { preopen: 9 * 60, midday: 12 * 60, postclose: 16 * 60 + 2, close: 16 * 60, morningLen: 150, sessionLen: 330 };
+      return null;
+    }
+    function sessionPhase(now, code) {
+      const d = now || new Date();
+      const mins = d.getHours() * 60 + d.getMinutes();
+      const dl = briefDeadlines(code);
+      if (!dl) return { ok: false };
+      let phase = "preopen";
+      if (mins >= dl.postclose) phase = "postclose";
+      else if (mins >= dl.midday) phase = "midday";
+      else if (mins >= 9 * 60 + 30) phase = "session";
+      return { ok: true, phase, mins, dl, market: marketOf(code) };
+    }
+
+    /** 从分钟点算区间统计：高低、VWAP、成交量、上涨/下跌量比 */
+    function segmentStats(points, from, to) {
+      const out = { n: 0, hi: null, lo: null, first: null, last: null, vwap: null, vol: 0, upVol: 0, downVol: 0 };
+      let pv = 0, vv = 0, prev = null;
+      for (const p of points || []) {
+        const s = p.slot == null ? null : p.slot;
+        if (s == null) continue;
+        if (from != null && s < from) { prev = p; continue; }
+        if (to != null && s > to) break;
+        if (p.price == null) continue;
+        out.n++;
+        if (!out.first) out.first = p;
+        out.last = p;
+        if (out.hi == null || p.price > out.hi) out.hi = p.price;
+        if (out.lo == null || p.price < out.lo) out.lo = p.price;
+        const v = p.volInc || 0;
+        out.vol += v;
+        if (v > 0) { pv += p.price * v; vv += v; }
+        if (prev && prev.price != null) {
+          if (p.price > prev.price) out.upVol += v;
+          else if (p.price < prev.price) out.downVol += v;
+        }
+        prev = p;
+      }
+      out.vwap = vv > 0 ? pv / vv : null;
+      return out;
+    }
+
+    /** 昨日（或最近一根已收盘）日线：从 daily.lastBars 取今天之前最后一根 */
+    function prevDailyBar(daily, today) {
+      if (!daily || !daily.ok || !daily.lastBars || !daily.lastBars.length) return null;
+      const t = today || todayStr();
+      const bars = daily.lastBars.filter((b) => b.date !== t);
+      return bars.length ? bars[bars.length - 1] : null;
+    }
+
+    /** 近整数关口（在给定价格附近） */
+    function nearRoundLevels(price, n) {
+      const out = [];
+      const step = price >= 100 ? 5 : price >= 20 ? 1 : 0.5;
+      const base = Math.floor(price / step) * step;
+      for (let i = -2; i <= 2; i++) out.push(+(base + i * step).toFixed(2));
+      return out.filter((x) => x > 0).sort((a, b) => Math.abs(a - price) - Math.abs(b - price)).slice(0, n || 4);
+    }
+
+    /**
+     * 生成每日简报（规则化，不是预测）。
+     * kind: "preopen"（开盘前策略）/ "midday"（上午分析+下午策略）/ "postclose"（盘后总结+明日策略）
+     * 返回 { ok, kind, title, summary, lines:[{k,v}], levels:{sup,res}, actions:[{cond,act}], risks:[] }
+     */
+    function buildBrief(kind, ctx) {
+      const c = ctx || {};
+      const code = c.code || DEFAULT_CODE;
+      const m = c.m || null;
+      const points = c.points || [];
+      const dl = briefDeadlines(code);
+      const out = { ok: false, kind, title: "", summary: "", lines: [], levels: { sup: [], res: [] }, actions: [], risks: [] };
+      if (!dl) { out.summary = "该市场暂不支持"; return out; }
+      const r2 = (x) => Math.round(x * 100) / 100;
+      const pct = (v) => (v == null ? "--" : (v >= 0 ? "+" : "") + v.toFixed(2) + "%");
+      const dedupeLevels = (arr, asc) => {
+        const sorted = (arr || []).slice().sort((a, b) => (asc ? a.p - b.p : b.p - a.p));
+        const keep = [];
+        for (const x of sorted) {
+          if (keep.some((y) => Math.abs(y.p / x.p - 1) < 0.003)) continue;
+          keep.push(x);
+        }
+        return keep;
+      };
+
+      const price = m && m.price > 0 ? m.price : null;
+      const today = todayStr();
+      const daily = c.daily && c.daily.ok ? c.daily : null;
+      const yBar = prevDailyBar(daily, today);
+      const atr = c.atr != null ? c.atr : null;
+
+      if (kind === "preopen") {
+        out.title = "开盘前操盘策略（09:00 前）";
+        if (!daily || !yBar) { out.summary = "日线数据未就绪，稍后刷新"; return out; }
+        const prevClose = yBar.c;
+        const gapUp = r2(prevClose * 1.01), gapDown = r2(prevClose * 0.99);
+        out.summary = "昨日收 " + r2(prevClose) + "（昨日" + (yBar.o ? (((yBar.c / yBar.o - 1) * 100) >= 0 ? "涨" : "跌") + Math.abs((yBar.c / yBar.o - 1) * 100).toFixed(2) + "%" : "--") + "）· 日线" +
+          ({ up: "多头", down: "空头", flat: "震荡" })[daily.trend] + " · 20日区间 " + r2(daily.low20) + "–" + r2(daily.high20);
+        out.lines.push({ k: "日线", v: "MA20 " + (daily.ma20 == null ? "--" : r2(daily.ma20)) + " · MA60 " + (daily.ma60 == null ? "--" : r2(daily.ma60)) + " · MACD " + (daily.macd ? (daily.macd.cross || (daily.macd.bull ? "多头" : "空头")) : "--") + " · KDJ " + (daily.kdj ? daily.kdj.zone : "--") });
+        out.lines.push({ k: "昨日", v: "开 " + r2(yBar.o) + " 高 " + r2(yBar.h) + " 低 " + r2(yBar.l) + " 收 " + r2(yBar.c) });
+        // 关键位
+        out.levels.res.push({ p: r2(yBar.h), why: "昨日高点" });
+        if (daily.ma20 != null && daily.ma20 > prevClose) out.levels.res.push({ p: r2(daily.ma20), why: "日线 MA20" });
+        if (daily.high20 != null && daily.high20 > prevClose * 1.02) out.levels.res.push({ p: r2(daily.high20), why: "20日高点" });
+        out.levels.sup.push({ p: r2(yBar.l), why: "昨日低点" });
+        if (daily.ma20 != null && daily.ma20 < prevClose) out.levels.sup.push({ p: r2(daily.ma20), why: "日线 MA20" });
+        if (daily.low20 != null && daily.low20 < prevClose * 0.98) out.levels.sup.push({ p: r2(daily.low20), why: "20日低点" });
+        const round = nearRoundLevels(prevClose, 3);
+        round.forEach((x) => { if (x > prevClose) out.levels.res.push({ p: x, why: "整数关口" }); else out.levels.sup.push({ p: x, why: "整数关口" }); });
+        // 动作（条件化）
+        const sup = out.levels.sup[0] ? out.levels.sup[0].p : r2(prevClose * 0.97);
+        const res = out.levels.res[0] ? out.levels.res[0].p : r2(prevClose * 1.03);
+        if (daily.trend === "down") {
+          out.actions.push({ cond: "反弹到 " + res + " 附近", act: "以减仓为主，不追" });
+          out.actions.push({ cond: "跌破 " + sup + " 且放量", act: "继续减/空仓等待，不接飞刀" });
+          out.risks.push("日线空头排列：反弹性质，仓位不宜放大");
+        } else if (daily.trend === "up") {
+          out.actions.push({ cond: "回踩 " + sup + " 不破", act: "可考虑低吸，止损放 " + r2(sup * 0.99) });
+          out.actions.push({ cond: "放量站上 " + res, act: "持有/加仓（顺势）" });
+          out.risks.push("日线多头但注意冲高回落，别追在缺口上");
+        } else {
+          out.actions.push({ cond: "有效突破 " + res, act: "才算转强，可小仓跟" });
+          out.actions.push({ cond: "跌破 " + sup, act: "观望" });
+          out.risks.push("日线震荡：只做区间，不追突破假信号");
+        }
+        out.actions.push({ cond: "高开 >" + gapUp + "（+1%）", act: "不追高，等回踩均价再看" });
+        out.actions.push({ cond: "低开 <" + gapDown + "（-1%）", act: "先观察能否 30 分钟内收回昨收" });
+        out.levels.sup = dedupeLevels(out.levels.sup, false);
+        out.levels.res = dedupeLevels(out.levels.res, true);
+        out.ok = true;
+        return out;
+      }
+
+      if (kind === "midday") {
+        out.title = "午间简报（11:32 前）：上午走势 + 下午策略";
+        const st = segmentStats(points, 0, dl.morningLen - 1);
+        if (!st.n) { out.summary = "上午数据不足，稍后刷新"; return out; }
+        const open = points.length && points[0] ? points[0].price : null;
+        const chg = m && m.changePct != null ? m.changePct : (open ? (st.last.price / open - 1) * 100 : null);
+        const posInRange = st.hi > st.lo ? (st.last.price - st.lo) / (st.hi - st.lo) : 0.5;
+        const aboveVwap = st.vwap != null && st.last.price >= st.vwap;
+        const volRatio = st.downVol > 0 ? st.upVol / st.downVol : (st.upVol > 0 ? 3 : 1);
+        const strong = aboveVwap && posInRange >= 0.6 && volRatio >= 1;
+        const weak = !aboveVwap && posInRange <= 0.4;
+        out.summary = "上午 " + pct(chg) + " · 高 " + r2(st.hi) + " 低 " + r2(st.lo) + " · 均价 " + (st.vwap == null ? "--" : r2(st.vwap)) +
+          " · 收在日内 " + Math.round(posInRange * 100) + "% 位置" + (aboveVwap ? "（均价上方）" : "（均价下方）");
+        out.lines.push({ k: "量能", v: "成交额 " + (m && m.turnover ? (m.turnover / 1e8).toFixed(2) + "亿" : "--") + " · 涨跌量比 " + volRatio.toFixed(2) });
+        out.lines.push({ k: "相对强弱", v: c.indexPct == null ? "--" : "个股 " + pct(chg) + " vs 大盘 " + pct(c.indexPct) + "（" + (chg - c.indexPct >= 0 ? "强" : "弱") + " " + Math.abs(chg - c.indexPct).toFixed(2) + "%）" });
+        out.lines.push({ k: "上午定性", v: strong ? "偏强（站上均价且收在高位）" : weak ? "偏弱（均价下方且收在低位）" : "震荡（方向不明）" });
+        // 下午关键位
+        out.levels.res.push({ p: r2(st.hi), why: "上午高点" });
+        if (st.vwap != null && st.vwap > st.last.price) out.levels.res.push({ p: r2(st.vwap), why: "上午均价" });
+        out.levels.sup.push({ p: r2(st.lo), why: "上午低点" });
+        if (st.vwap != null && st.vwap < st.last.price) out.levels.sup.push({ p: r2(st.vwap), why: "上午均价" });
+        if (m && m.prevClose) out.levels.sup.push({ p: r2(m.prevClose), why: "昨收" });
+        // 动作
+        if (strong) {
+          out.actions.push({ cond: "13:00 后回踩 " + (st.vwap == null ? "--" : r2(st.vwap)) + " 不破", act: "可持有/低吸，止损放上午低点下方" });
+          out.actions.push({ cond: "放量突破 " + r2(st.hi), act: "持有，目标看日线压力位" });
+        } else if (weak) {
+          out.actions.push({ cond: "反弹到 " + (st.vwap == null ? "--" : r2(st.vwap)) + " 附近", act: "减仓为主，不追" });
+          out.actions.push({ cond: "跌破 " + r2(st.lo), act: "减仓/止损，等企稳" });
+        } else {
+          out.actions.push({ cond: "站上 " + (st.vwap == null ? "--" : r2(st.vwap)), act: "偏多看待，小仓试" });
+          out.actions.push({ cond: "跌破 " + r2(st.lo), act: "偏空看待，减仓" });
+        }
+        out.actions.push({ cond: "14:30 后", act: "决定是否持仓过夜（T+1 不能当天卖）" });
+        out.risks.push("下午开盘 13:00–13:30 常见方向选择，别急于追第一波");
+        out.levels.sup = dedupeLevels(out.levels.sup, false);
+        out.levels.res = dedupeLevels(out.levels.res, true);
+        out.ok = true;
+        return out;
+      }
+
+      // postclose
+      out.title = "盘后总结（15:02 前）+ 明日策略";
+      const st = segmentStats(points, 0, null);
+      if (!st.n) { out.summary = "今日数据不足"; return out; }
+      const chg = m && m.changePct != null ? m.changePct : null;
+      const posInRange = st.hi > st.lo ? (st.last.price - st.lo) / (st.hi - st.lo) : 0.5;
+      const volRatio = st.downVol > 0 ? st.upVol / st.downVol : (st.upVol > 0 ? 3 : 1);
+      out.summary = "今日收 " + (st.last ? r2(st.last.price) : "--") + "（" + pct(chg) + "）· 振幅 " +
+        (st.hi && st.lo && st.hi > st.lo ? ((st.hi - st.lo) / st.last.price * 100).toFixed(2) + "%" : "--") +
+        " · 收在日内 " + Math.round(posInRange * 100) + "% 位置";
+      out.lines.push({ k: "均价", v: (st.vwap == null ? "--" : r2(st.vwap)) + (st.vwap != null && st.last.price >= st.vwap ? "（收在均价上方，偏强）" : "（收在均价下方，偏弱）") });
+      out.lines.push({ k: "量价", v: "涨跌量比 " + volRatio.toFixed(2) + " · " + (c.wash && c.wash.ok ? c.wash.summary : "洗盘/出货数据不足") });
+      if (c.setup && c.setup.ok) {
+        out.lines.push({ k: "系统评分", v: (c.setup.grade === "noTrade" ? "不交易" : c.setup.grade + " 级") + " · " + c.setup.score + "/100" + (c.setup.vetoes.length ? " · 否决：" + c.setup.vetoes[0] : "") });
+      }
+      if (c.ledger && c.ledger.today) out.lines.push({ k: "今日台账", v: c.ledger.today });
+      // 明日关键位
+      const yBarToday = daily && daily.lastBars ? daily.lastBars[daily.lastBars.length - 1] : null;
+      out.levels.res.push({ p: r2(st.hi), why: "今日高点" });
+      if (daily && daily.ma20 != null && daily.ma20 > st.last.price) out.levels.res.push({ p: r2(daily.ma20), why: "日线 MA20" });
+      if (daily && daily.high20 != null && daily.high20 > st.last.price * 1.02) out.levels.res.push({ p: r2(daily.high20), why: "20日高点" });
+      out.levels.sup.push({ p: r2(st.lo), why: "今日低点" });
+      if (st.vwap != null && st.vwap < st.last.price) out.levels.sup.push({ p: r2(st.vwap), why: "今日均价" });
+      if (daily && daily.ma20 != null && daily.ma20 < st.last.price) out.levels.sup.push({ p: r2(daily.ma20), why: "日线 MA20" });
+      if (daily && daily.low20 != null && daily.low20 < st.last.price * 0.98) out.levels.sup.push({ p: r2(daily.low20), why: "20日低点" });
+      // 明日动作
+      const sup = out.levels.sup[0] ? out.levels.sup[0].p : r2(st.last.price * 0.97);
+      const res = out.levels.res[0] ? out.levels.res[0].p : r2(st.last.price * 1.03);
+      const atrStop = atr != null ? r2(st.last.price - 1.5 * atr) : null;
+      if (daily && daily.trend === "down") {
+        out.actions.push({ cond: "明日反弹到 " + res + " 附近", act: "减仓为主（空头趋势中的反弹）" });
+        out.actions.push({ cond: "跌破 " + sup + " 且放量", act: "减/止损，等下一支撑" });
+      } else if (daily && daily.trend === "up") {
+        out.actions.push({ cond: "回踩 " + sup + " 不破", act: "可低吸，止损 " + (atrStop || r2(sup * 0.99)) });
+        out.actions.push({ cond: "放量突破 " + res, act: "持有/加仓" });
+      } else {
+        out.actions.push({ cond: "突破 " + res, act: "转强信号，小仓跟" });
+        out.actions.push({ cond: "跌破 " + sup, act: "观望/减仓" });
+      }
+      if (atrStop) out.actions.push({ cond: "参考止损（ATR）", act: "跌破 " + atrStop + " 按纪律减" });
+      out.actions.push({ cond: "高开 >2%", act: "不追，等回踩均价" });
+      out.actions.push({ cond: "低开 >2%", act: "先看能否收回昨收，收不回减仓" });
+      out.risks.push("隔夜受消息面/外围影响，任何计划都可能失效；T+1 今天买入明天才能卖");
+      out.levels.sup = dedupeLevels(out.levels.sup, false);
+      out.levels.res = dedupeLevels(out.levels.res, true);
+      out.ok = true;
       return out;
     }
 
@@ -2212,6 +2448,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     poolWindow: poolWindow, rankPoolCandidates: rankPoolCandidates, parseBatchSnapshot: parseBatchSnapshot, poolHitStats: poolHitStats, limitPctOfCode: limitPctOfCode,
     poolHistoryLines: poolHistoryLines,
     poolTargetOf: poolTargetOf,
+    buildBrief: buildBrief, sessionPhase: sessionPhase, briefDeadlines: briefDeadlines, segmentStats: segmentStats, prevDailyBar: prevDailyBar,
     parseSinaRank: parseSinaRank,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
@@ -2228,7 +2465,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.19 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.20 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2254,6 +2491,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   st.srcStats = st.srcStats || null;
   st.ledger = st.ledger || { records: [] };
   st.capital = st.capital || {};
+  st.briefs = st.briefs || {};
   st.eventRisk = st.eventRisk || false;
   if (st.watch.indexOf(st.code) < 0) st.watch.unshift(st.code);
 
@@ -2458,6 +2696,101 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       renderPoolCard();
     });
     if (meta) meta.textContent = mine ? "今日已生成" : "未生成";
+  }
+
+  function todayLedgerText() {
+    var tk = todayKey();
+    var recs = (st.ledger && st.ledger.records) || [];
+    var mine = recs.filter(function (r) { return r.code === st.code && (r.name || "").length >= 0; });
+    var closed = mine.filter(function (r) { return r.status === "closed"; });
+    if (!mine.length) return "今日无 A/B 级信号";
+    var wins = closed.filter(function (r) { return r.result === "target"; }).length;
+    var losses = closed.filter(function (r) { return r.result === "stop"; }).length;
+    return "今日信号 " + mine.length + " 条" + (closed.length ? "（已结算 " + closed.length + "：胜 " + wins + " / 负 " + losses + "）" : "（未结算）");
+  }
+
+  function ensureBriefs() {
+    if (!dailyData || !dailyData.ok || !metrics) return;
+    var tk = todayKey();
+    st.briefs = st.briefs || {};
+    var day = st.briefs[tk] || (st.briefs[tk] = {});
+    var ph = C.sessionPhase(new Date(), st.code);
+    if (!ph.ok) return;
+    var points = allPointsNow();
+    var changed = false;
+    if (!day.preopen) {
+      var b1 = C.buildBrief("preopen", { code: st.code, m: metrics, daily: dailyData, points: points });
+      if (b1.ok) { day.preopen = { at: Date.now(), brief: b1 }; changed = true; }
+    }
+    if (!day.midday && ph.mins >= ph.dl.midday && points.length) {
+      var morning = points.filter(function (p) { return p.slot != null && p.slot < ph.dl.morningLen; });
+      var b2 = C.buildBrief("midday", { code: st.code, m: metrics, points: morning, indexPct: indexData ? indexData.pct : null });
+      if (b2.ok) { day.midday = { at: Date.now(), brief: b2 }; changed = true; }
+    }
+    if (!day.postclose && ph.mins >= ph.dl.postclose && points.length) {
+      var b3 = C.buildBrief("postclose", { code: st.code, m: metrics, daily: dailyData, points: points,
+        wash: lastWash, setup: lastSetup, atr: lastSetup && lastSetup.atr ? lastSetup.atr.atr : null,
+        ledger: { today: todayLedgerText() }, indexPct: indexData ? indexData.pct : null });
+      if (b3.ok) { day.postclose = { at: Date.now(), brief: b3 }; changed = true; }
+    }
+    if (changed) {
+      // 只保留最近 5 天
+      var keys = Object.keys(st.briefs).sort();
+      while (keys.length > 5) { delete st.briefs[keys.shift()]; }
+      save({ briefs: st.briefs });
+      renderBriefCard();
+    }
+  }
+
+  function briefHtml(b) {
+    var html = "";
+    if (b.summary) html += '<div class="washsum unclear">' + b.summary + "</div>";
+    (b.lines || []).forEach(function (l) {
+      html += '<div class="washrow"><span class="ln">' + l.k + "</span><span>" + l.v + "</span></div>";
+    });
+    var sup = (b.levels && b.levels.sup || []).slice(0, 3).map(function (x) { return x.p + "(" + x.why + ")"; }).join(" · ");
+    var res = (b.levels && b.levels.res || []).slice(0, 3).map(function (x) { return x.p + "(" + x.why + ")"; }).join(" · ");
+    if (sup) html += '<div class="sigwhy">支撑：' + sup + "</div>";
+    if (res) html += '<div class="sigwhy">压力：' + res + "</div>";
+    (b.actions || []).forEach(function (a) {
+      html += '<div class="sigwhy">· 如果 <b>' + a.cond + "</b> → " + a.act + "</div>";
+    });
+    (b.risks || []).forEach(function (r) { html += '<div class="sigveto">⚠ ' + r + "</div>"; });
+    return html;
+  }
+
+  function renderBriefCard() {
+    var box = $("briefBox"), meta = $("briefMeta");
+    if (!box) return;
+    var tk = todayKey();
+    var day = (st.briefs && st.briefs[tk]) || {};
+    var ph = C.sessionPhase(new Date(), st.code);
+    var html = "";
+    function block(key, title, readyBy) {
+      var it = day[key];
+      var stateTxt = it ? "已生成 " + new Date(it.at).toTimeString().slice(0, 5) : "待生成（" + readyBy + " 前自动）";
+      html += '<div class="washrow"><span class="lw">' + title + "</span><span>" + stateTxt + "</span></div>";
+      if (it) html += briefHtml(it.brief);
+    }
+    block("preopen", "盘前策略", "09:00");
+    block("midday", "午间简报（上午分析 + 下午策略）", "11:32");
+    block("postclose", "盘后总结（+ 明日策略）", "15:02");
+    if (ph.ok) {
+      html += '<div class="sigwhy" style="font-size:10.5px">当前阶段：' +
+        ({ preopen: "开盘前", session: "盘中", midday: "午间", postclose: "盘后" })[ph.phase] +
+        " · 简报按时间点自动生成，可手动刷新。</div>";
+    }
+    html += '<div><button class="ledclear" id="btnBriefRefresh">刷新简报</button></div>';
+    box.innerHTML = html;
+    var btn = $("btnBriefRefresh");
+    if (btn) btn.addEventListener("click", function () {
+      var tk2 = todayKey();
+      if (st.briefs) delete st.briefs[tk2];
+      save({ briefs: st.briefs });
+      ensureBriefs();
+      renderBriefCard();
+    });
+    if (meta) meta.textContent = ph.ok ? ({ preopen: "盘前", session: "盘中", midday: "午间", postclose: "盘后" })[ph.phase] : "";
   }
 
   function renderSignalCard() {
@@ -3395,7 +3728,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         ctx3Data = C.threeDayContext(allPts, 3);
         // 日线（5 分钟）/ 大盘（60 秒）/ 盘口（每轮，仅 A 股）
         if (dailyCode !== st.code || Date.now() - dailyAt > 300000) {
-          fetchDaily(st.code).then(function (d) { dailyData = d; dailyAt = Date.now(); dailyCode = st.code; }).catch(function () {});
+          fetchDaily(st.code).then(function (d) { dailyData = d; dailyAt = Date.now(); dailyCode = st.code;
+            try { ensureBriefs(); renderBriefCard(); } catch (e) {} }).catch(function () {});
         }
         if (Date.now() - indexAt > 60000) {
           fetchIndex(st.code).then(function (ix) { indexData = ix; indexAt = Date.now(); }).catch(function () {});
@@ -3412,6 +3746,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         }
         render(metrics, p.points);
         try { renderSignalCard(); } catch (e) { /* 指标不足时不阻塞行情 */ }
+        try { ensureBriefs(); renderBriefCard(); } catch (e) { /* 简报失败不阻塞 */ }
         if (historyCode !== requested || !historyPoints || Date.now() - historyAt > 180000) {
           fetchHistory(requested).then(function (pts) {
             if (!pts || !pts.length || requested !== st.code) return;
