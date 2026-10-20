@@ -996,5 +996,16 @@ ok("实时：无行情的股票 liveChgPct 为 null", withLive[1].liveChgPct ===
 ok("实时：不修改原数据", rawPicks[0].liveChgPct === undefined);
 ok("页面：观察池渲染含实时字样", html.indexOf("实时 ") >= 0);
 
+
+/* ---------- 28) 涨跌颜色 ---------- */
+console.log("\n[涨跌颜色]");
+ok("导出 chgClass", typeof C.chgClass === "function");
+ok("涨 → cUp（红）", C.chgClass(1.23) === "cUp" && C.chgClass(0.01) === "cUp");
+ok("跌 → cDown（绿）", C.chgClass(-1.23) === "cDown" && C.chgClass(-0.01) === "cDown");
+ok("持平 → cFlat（白）", C.chgClass(0) === "cFlat" && C.chgClass(0.004) === "cFlat" && C.chgClass(-0.004) === "cFlat");
+ok("空值 → 无颜色类", C.chgClass(null) === "");
+ok("CSS 含三色定义", html.includes(".cUp{color:var(--up)}") && html.includes(".cDown{color:var(--down)}") && html.includes(".cFlat{color:var(--txt)}"));
+ok("观察池渲染使用 chgClass", html.includes("liveCls = C.chgClass("));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
