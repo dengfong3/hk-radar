@@ -1333,13 +1333,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     }
 
     /* ================= 信号台账：记录每张单子，事后统计胜率/期望 ================= */
-    function ledgerAdd(ledger, setup, code, nowMs) {
+    function ledgerAdd(ledger, setup, code, nowMs, name) {
       if (!ledger || !setup || setup.grade === "noTrade" || setup.side === "none") return ledger;
       if (!ledger.records) ledger.records = [];
       const mid = setup.entry ? (setup.entry.lo + setup.entry.hi) / 2 : null;
       ledger.records.push({
         id: nowMs + ":" + ledger.records.length,
-        ts: nowMs, code, side: setup.side, grade: setup.grade, score: setup.score,
+        ts: nowMs, code, name: name ? String(name) : "", side: setup.side, grade: setup.grade, score: setup.score,
         entry: mid, stop: setup.stop, target: setup.target, rr: setup.rr,
         size: setup.size, status: "open", result: null, retPct: null, closedTs: null
       });
@@ -1365,13 +1365,17 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
     function ledgerStats(ledger) {
       const out = { total: 0, closed: 0, open: 0, target: 0, stop: 0, expired: 0,
-        winRate: null, avgWin: null, avgLoss: null, expectancy: null, byGrade: {} };
+        winRate: null, avgWin: null, avgLoss: null, expectancy: null, byGrade: {}, byCode: {} };
       if (!ledger || !ledger.records) return out;
       const recs = ledger.records;
       out.total = recs.length;
       const wins = [], losses = [];
       for (const r of recs) {
-        if (r.status === "open") { out.open++; continue; }
+        const c = out.byCode[r.code] || (out.byCode[r.code] = { name: r.name || "", n: 0, win: 0, exp: 0, open: 0 });
+        c.n++;
+        if (r.result === "target") c.win++;
+        if (r.retPct != null) c.exp += r.retPct;
+        if (r.status === "open") { c.open++; out.open++; continue; }
         out.closed++;
         if (r.result === "target") { out.target++; wins.push(r.retPct); }
         else if (r.result === "stop") { out.stop++; losses.push(r.retPct); }
@@ -2165,7 +2169,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.17 · 2026-10-19";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.18 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2258,7 +2262,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         var r = lg.records[i];
         if (r.code === st.code && r.side === sp.side && now - r.ts < 30 * 60 * 1000) { dup = true; break; }
       }
-      if (!dup) { C.ledgerAdd(lg, sp, st.code, now); save({ ledger: lg }); }
+      if (!dup) {
+        var nm = (parsed && parsed.quote && parsed.quote.name) || "";
+        C.ledgerAdd(lg, sp, st.code, now, nm);
+        save({ ledger: lg });
+      }
     }
     if (metrics && metrics.price != null) {
       C.ledgerEval(lg, st.code, metrics.price, now);
@@ -2510,12 +2518,24 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       var sideT = r.side === "long" ? "多" : "减";
       var res = r.result === "target" ? "✓ 到目标" : r.result === "stop" ? "✗ 打止损" : r.result === "expired" ? "… 超时" : "进行中";
       var cls = r.result === "target" ? "win" : r.result === "stop" ? "loss" : "open";
-      html += '<div class="ledrow ' + cls + '"><b>' + ts + "</b> " + sideT + " " + r.grade + " 级 · 进 " +
+      var stockLabel = (r.name ? r.name + " " : "") + C.displayCode(r.code);
+      html += '<div class="ledrow ' + cls + '"><b>' + ts + "</b> <b>" + stockLabel + "</b> " + sideT + " " + r.grade + " 级 · 进 " +
         (r.entry == null ? "--" : r.entry.toFixed(2)) + " 损 " + (r.stop == null ? "--" : r.stop.toFixed(2)) +
         " 标 " + (r.target == null ? "--" : r.target.toFixed(2)) + " · " + res +
         (r.retPct == null ? "" : "（" + pctTxt(r.retPct) + "）") + "</div>";
     }
     if (!recs.length) html += '<div class="sigwhy">暂无记录：出现 A/B 级信号时会自动记一条，用来统计真实胜率。</div>';
+    // 分股统计（多只股票时才有意义）
+    var codes = Object.keys(stt.byCode || {});
+    if (codes.length > 1) {
+      html += '<div class="sigwhy"><b>分股统计</b></div>';
+      codes.forEach(function (cd) {
+        var c = stt.byCode[cd];
+        var nm = c.name ? c.name + " " : "";
+        html += '<div class="sigwhy">' + nm + C.displayCode(cd) + "：" + c.n + " 笔 · 胜 " + c.win +
+          " · 累计 " + (c.exp >= 0 ? "+" : "") + c.exp.toFixed(2) + "%</div>";
+      });
+    }
     html += '<div><button class="ledclear" id="btnLedgerClear">清空台账</button></div>';
     box.innerHTML = html;
     var bc = $("btnLedgerClear");

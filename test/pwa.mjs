@@ -785,5 +785,38 @@ await new Promise((r) => setTimeout(r, 200));
 ok("渲染：出现『观察池历史』", h5.deep("poolBox").indexOf("观察池历史") >= 0, h5.deep("poolBox").slice(0, 120));
 ok("渲染：历史含次日统计文案", h5.deep("poolBox").indexOf("次日 1/2 上涨") >= 0, h5.deep("poolBox").slice(0, 300));
 
+
+/* ---------- 20) 台账分股标识 ---------- */
+console.log("\n[台账分股标识]");
+const lg2 = { records: [] };
+C.ledgerAdd(lg2, { ok: true, grade: "B", side: "long", score: 70, entry: { lo: 100, hi: 100 }, stop: 98, target: 103, rr: 2.5, size: 100 }, "sh603083", 1000, "剑桥科技");
+ok("台账：记录带股票名", lg2.records[0].name === "剑桥科技", lg2.records[0].name);
+C.ledgerAdd(lg2, { ok: true, grade: "A", side: "long", score: 80, entry: { lo: 84, hi: 84 }, stop: 83, target: 86, rr: 2, size: 200 }, "hk06166", 2000, "腾讯控股");
+C.ledgerEval(lg2, "sh603083", 103.5, 3000);
+C.ledgerEval(lg2, "hk06166", 82.5, 4000);
+const stt2 = C.ledgerStats(lg2);
+ok("台账：byCode 按股票分组", Object.keys(stt2.byCode).length === 2 && stt2.byCode.sh603083.name === "剑桥科技" && stt2.byCode.hk06166.n === 1, Object.keys(stt2.byCode));
+ok("台账：分股统计累计为负（06166 亏）", stt2.byCode.hk06166.exp < 0, stt2.byCode.hk06166);
+
+// 渲染：两笔不同股票的记录
+const h6 = makeHarness(
+  { code: "sz300607", watch: ["sz300607"], sound: false, chartMode: "min", pos: {}, plans: {}, trade: {}, lastFired: {},
+    pools: [], srcStats: null,
+    ledger: { records: [
+      { id: "1", ts: 1760920000000, code: "hk06166", name: "腾讯控股", side: "long", grade: "B", score: 70,
+        entry: 84.47, stop: 83.44, target: 87.42, rr: 1.9, size: 50, status: "closed", result: "stop", retPct: -1.23 },
+      { id: "2", ts: 1760921000000, code: "sz300607", name: "拓斯达", side: "long", grade: "A", score: 82,
+        entry: 27.5, stop: 27.1, target: 28.4, rr: 2.2, size: 300, status: "open", result: null, retPct: null }
+    ] } },
+  () => null, { snapshotOnly: false });
+let threw6 = null;
+try { h6.run(coreSrc); h6.run(uiSrc); } catch (e) { threw6 = e; }
+ok("渲染：台账场景无异常", !threw6, threw6 && threw6.message);
+await new Promise((r) => setTimeout(r, 250));
+const ledTxt = h6.deep("ledgerBox");
+ok("渲染：台账显示股票代码（06166.HK）", ledTxt.indexOf("06166.HK") >= 0, ledTxt.slice(0, 160));
+ok("渲染：台账显示股票名（腾讯控股/拓斯达）", ledTxt.indexOf("腾讯控股") >= 0 && ledTxt.indexOf("拓斯达") >= 0, ledTxt.slice(0, 200));
+ok("渲染：多股票时出现分股统计", ledTxt.indexOf("分股统计") >= 0, ledTxt.slice(0, 300));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
