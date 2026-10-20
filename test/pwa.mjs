@@ -1007,5 +1007,16 @@ ok("空值 → 无颜色类", C.chgClass(null) === "");
 ok("CSS 含三色定义", html.includes(".cUp{color:var(--up)}") && html.includes(".cDown{color:var(--down)}") && html.includes(".cFlat{color:var(--txt)}"));
 ok("观察池渲染使用 chgClass", html.includes("liveCls = C.chgClass("));
 
+
+/* ---------- 29) 观察池 14:50 生成 ---------- */
+console.log("\n[观察池 14:50]");
+ok("窗口：14:49 不进", C.poolWindow(new Date(2026, 9, 20, 14, 49)).inWindow === false);
+ok("窗口：14:50 进（留 10 分钟买入）", C.poolWindow(new Date(2026, 9, 20, 14, 50)).inWindow === true);
+ok("窗口：15:05 仍在", C.poolWindow(new Date(2026, 9, 20, 15, 5)).inWindow === true);
+ok("窗口：15:06 结束", C.poolWindow(new Date(2026, 9, 20, 15, 6)).inWindow === false);
+ok("卡片标题为 14:50", html.indexOf("14:50 尾盘观察池") >= 0, "标题");
+ok("自动刷新间隔 3 分钟", html.indexOf("Date.now() - lastGen > 180000") >= 0, "刷新间隔");
+ok("卡片显示生成时间", html.indexOf("生成 \" +\n        (mine.genAt") >= 0 || html.indexOf("mine.genAt ? C.fmtLocalTime") >= 0, "生成时间");
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

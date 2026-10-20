@@ -270,7 +270,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 </div>
 
 <div class="card">
-  <div class="card-title"><b>14:57 尾盘观察池</b><span class="sp"></span><span id="poolMeta" style="font-size:10px"></span></div>
+  <div class="card-title"><b>14:50 尾盘观察池</b><span class="sp"></span><span id="poolMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="poolBox"></div>
 </div>
 
@@ -2508,7 +2508,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.27 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.28 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2681,10 +2681,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     for (var i = pools.length - 1; i >= 0; i--) if (pools[i].date === today) { mine = pools[i]; break; }
     var html = "";
     if (!mine) {
-      html += '<div class="sigwhy">14:50 后自动生成；也可以现在手动生成（用当前榜单数据）。</div>';
+      html += '<div class="sigwhy">14:50 起自动生成，之后每 3 分钟刷新一次（留出买入时间）；也可以现在手动生成（用当前榜单数据）。</div>';
       html += '<div><button class="ledclear" id="btnPoolGen">立即生成今日观察池</button></div>';
     } else {
-      html += '<div class="sigwhy">' + mine.date + " 收盘特征筛选 · " + mine.picks.length + " 只 · 榜单 " +
+      html += '<div class="sigwhy">' + mine.date + " 收盘特征筛选 · " + mine.picks.length + " 只 · 生成 " +
+        (mine.genAt ? C.fmtLocalTime(mine.genAt).slice(11) : "--") + " · 榜单 " +
         (mine.listsOk == null ? "--" : mine.listsOk + "/" + (mine.listsTotal || 5)) + " 可用" +
         (mine.source === "sina" ? "（备用源：新浪）" : "") + "</div>";
       var liveRows = C.attachPoolLive(mine.picks, poolLive);
@@ -3491,7 +3492,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   /* 3 天历史（多周期 K 线与 3 日背景用；慢速拉取，失败降级为仅今日） */
   var historyPoints = null, historyAt = 0, historyCode = "", mpData = null, ctx3Data = null;
   var dailyData = null, dailyAt = 0, dailyCode = "", orderData = null, orderAt = 0, indexData = null, indexAt = 0;
-  var poolBuilding = false, poolAutoDate = "", poolRetryCount = 0;
+  var poolBuilding = false, poolAutoDate = "", poolRetryCount = 0, poolAutoCount = 0;
   var poolLive = {}, poolLiveAt = 0, poolLiveKey = "";
   var failStreak = 0;
   function allPointsNow() {
@@ -3616,7 +3617,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       });
   }
 
-  /* ---------- 14:57 尾盘观察池（今日特征，不是次日预测） ---------- */
+  /* ---------- 14:50 尾盘观察池（今日特征，不是次日预测） ---------- */
   var RANK_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23";
   var RANK_FIELDS = "f2,f3,f5,f6,f8,f10,f12,f13,f14,f15,f16,f17,f18,f23,f62,f100,f184";
   var RANK_HOSTS = ["push2.eastmoney.com", "push2delay.eastmoney.com", "82.push2.eastmoney.com"];
@@ -3820,10 +3821,18 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
             fetchPoolLive(curPool.picks);
           }
         } catch (e) {}
-        // 14:57 尾盘观察池：到点自动生成一次（A 股）
+        // 14:50 尾盘观察池：14:50 起每 3 分钟自动刷新（留出买入时间，最多 5 次）
         if (C.marketOf(st.code) === "cn") {
           var pw = C.poolWindow(new Date());
-          if (pw.inWindow && poolAutoDate !== todayKey() && !poolBuilding) buildPool();
+          var todayP = null;
+          (st.pools || []).forEach(function (p2) { if (p2.date === todayKey()) todayP = p2; });
+          var lastGen = todayP && todayP.genAt ? todayP.genAt : 0;
+          if (!pw.inWindow) {
+            poolAutoCount = 0;
+          } else if (!poolBuilding) {
+            var due = !lastGen ? poolAutoCount < 1 : (Date.now() - lastGen > 180000 && poolAutoCount < 5);
+            if (due) { poolAutoCount++; buildPool(); }
+          }
           verifyPools();
         }
         if (C.marketOf(st.code) === "cn" && Date.now() - orderAt > 8000) {
