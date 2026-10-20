@@ -984,5 +984,17 @@ ok("多周期节奏 → 智能信号 → 洗盘/出货 → 日线/盘口/大盘"
 ok("智能信号/洗盘 排在观察池与简报之前",
   html.indexOf('id="washBox"') < html.indexOf('id="poolBox"') &&
   html.indexOf('id="washBox"') < html.indexOf('id="briefBox"'));
+
+/* ---------- 27) 观察池实时涨跌 ---------- */
+console.log("\n[观察池实时涨跌]");
+ok("导出 attachPoolLive", typeof C.attachPoolLive === "function");
+const rawPicks = [{ code: "sh600001", name: "A", chgPct: 3.0, price: 10 }, { code: "sz300002", name: "B", chgPct: -4.0, price: 20 }];
+const liveMap = { sh600001: { price: 10.3, chgPct: 6.0 } };
+const withLive = C.attachPoolLive(rawPicks, liveMap);
+ok("实时：有行情的股票带上 liveChgPct", withLive[0].liveChgPct === 6.0 && withLive[0].livePrice === 10.3, withLive[0]);
+ok("实时：无行情的股票 liveChgPct 为 null", withLive[1].liveChgPct === null, withLive[1]);
+ok("实时：不修改原数据", rawPicks[0].liveChgPct === undefined);
+ok("页面：观察池渲染含实时字样", html.indexOf("实时 ") >= 0);
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
