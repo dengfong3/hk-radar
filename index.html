@@ -1715,6 +1715,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     /* ================= 每日简报：盘前 / 午间 / 盘后 ================= */
 
 
+
+    /** ISO(UTC) 时间 → 本地时间显示（避免直接截取 UTC 字符串导致差 8 小时） */
+    function fmtLocalTime(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      const p2 = (n) => String(n).padStart(2, "0");
+      return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) + " " +
+        p2(d.getHours()) + ":" + p2(d.getMinutes());
+    }
     /** 简报存储键：日期 + 代码（避免切换股票串数据） */
     function briefKey(day, code) {
       return String(day || "") + " " + String(code || "");
@@ -2458,6 +2468,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     poolTargetOf: poolTargetOf,
     buildBrief: buildBrief, sessionPhase: sessionPhase, briefDeadlines: briefDeadlines, segmentStats: segmentStats, prevDailyBar: prevDailyBar,
     briefKey: briefKey,
+    fmtLocalTime: fmtLocalTime,
     parseSinaRank: parseSinaRank,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
@@ -2474,7 +2485,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.23 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.24 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3049,7 +3060,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (p.lossBudget != null) parts.push("预算 " + p.lossBudget + " " + curLabel());
     if (p.hardStopFloor != null) parts.push("硬止损地板 " + p.hardStopFloor);
     el.innerHTML = "<b>" + C.displayCode(st.code) + "</b>：" + (parts.join(" · ") || "（空计划）") +
-      (p.updatedAt ? "<br><span style='color:#64748b'>更新于 " + p.updatedAt.slice(0, 16).replace("T", " ") + "</span>" : "");
+      (p.updatedAt ? "<br><span style='color:#64748b'>更新于 " + C.fmtLocalTime(p.updatedAt) + "（本地时间）</span>" : "");
   }
   function renderChips() {
     var box = $("chips");

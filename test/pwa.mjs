@@ -945,5 +945,33 @@ ok("港股 12:03 → 午间", C.sessionPhase(new Date(2026, 9, 20, 12, 3), "hk06
 ok("港股 16:03 → 盘后", C.sessionPhase(new Date(2026, 9, 20, 16, 3), "hk06166").phase === "postclose");
 ok("A股 15:03 → 盘后", C.sessionPhase(new Date(2026, 9, 20, 15, 3), "sz300607").phase === "postclose");
 
+
+/* ---------- 25) 计划更新时间显示为本地时间 ---------- */
+console.log("\n[计划更新时间]");
+ok("导出 fmtLocalTime", typeof C.fmtLocalTime === "function");
+const isoTest = "2026-10-20T03:16:00.000Z";
+const dtTest = new Date(isoTest);
+const expTest = dtTest.getFullYear() + "-" + String(dtTest.getMonth() + 1).padStart(2, "0") + "-" +
+  String(dtTest.getDate()).padStart(2, "0") + " " + String(dtTest.getHours()).padStart(2, "0") + ":" +
+  String(dtTest.getMinutes()).padStart(2, "0");
+ok("UTC ISO → 本地时间（不再差 8 小时）", C.fmtLocalTime(isoTest) === expTest, [C.fmtLocalTime(isoTest), expTest]);
+ok("fmtLocalTime 处理空值", C.fmtLocalTime("") === "" && C.fmtLocalTime(null) === "");
+
+// 渲染：计划摘要显示本地时间
+const planTs = Date.now() - 3600 * 1000;
+const prodIso = new Date(planTs).toISOString();
+const planExp = C.fmtLocalTime(prodIso);
+const h8 = makeHarness(
+  { code: "sz300607", watch: ["sz300607"], sound: false, chartMode: "min", pos: {}, trade: {}, lastFired: {},
+    pools: [], srcStats: null, ledger: { records: [] }, capital: {}, briefs: {},
+    plans: { sz300607: { takes: [{ id: "T1", lo: 29.08, hi: 29.38, short: "减 1 档" }], buys: [], reds: [], maxShares: 1000, lossBudget: 5342, vwapBand: 1.5, levels: [], updatedAt: prodIso } } },
+  () => null, { snapshotOnly: false });
+let threw8 = null;
+try { h8.run(coreSrc); h8.run(uiSrc); } catch (e) { threw8 = e; }
+ok("渲染：计划场景无异常", !threw8, threw8 && threw8.message);
+await new Promise((r) => setTimeout(r, 200));
+ok("渲染：更新时间显示为本地时间", h8.txt("planSummary").indexOf(planExp) >= 0, h8.txt("planSummary"));
+ok("渲染：标注（本地时间）", h8.txt("planSummary").indexOf("本地时间") >= 0);
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
