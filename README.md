@@ -609,3 +609,5 @@ node test/pwa.mjs        # 275 项：静态合规检查 + 假 DOM 两个场景 +
 - 所有数据（持仓、计划、自选、提醒冷却）**只存在本机 localStorage**；
 - 页面只向 `web.ifzq.gtimg.cn` 请求行情，**不上传任何用户数据**；
 - 无账号、无 Cookie、无统计埋点。
+
+<!-- pages rebuild trigger: 2026-10-20 11:44:37 -->
