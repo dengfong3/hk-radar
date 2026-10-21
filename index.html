@@ -2606,7 +2606,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.31 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.32 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4154,6 +4154,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   });
   $("btnPlanSuggest").addEventListener("click", function () {
     if (!metrics) { alert("行情未就绪，稍后再试"); return; }
+    readPos();   // 先把持仓卡里刚填的股数/成本读进来（不等 change 事件），否则算不出回本档
     var points = allPointsNow();
     var pos = curPos();
     var refs = C.intradayRefs(metrics, points, pos, { code: st.code, plan: curPlan() });
@@ -4166,7 +4167,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       " 档 · 止损 " + (sp.reds[0] ? sp.reds[0].at : "—") + " · 仓位上限 " + sp.maxShares +
       " 股（满仓 " + sp.fullPos + " / 预算允许 " + sp.riskCap + "）· 区间带宽 ±" + (sp.bandPct == null ? "--" : sp.bandPct) +
       "%（按 ATR 动态）· 止损方式 " + (sp.stopMode || "--") +
-      (sp.breakevenPrice ? " · 含回本档 " + sp.breakevenPrice : "") + "。请核对后点「保存计划」。";
+      (sp.breakevenPrice ? " · 含回本档 " + sp.breakevenPrice
+        : (pos.cost > 0 ? "" : " · 未填持仓：先在「持仓」卡填股数+成本才会生成回本档")) + "。请核对后点「保存计划」。";
   });
 
   $("btnPlanClear").addEventListener("click", function () {

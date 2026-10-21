@@ -1088,5 +1088,36 @@ const hasIntra = downSp.takes.some((t) => (t.why || "").indexOf("日线") < 0 &&
 ok("空头趋势：减仓档包含日线关键位", hasDaily, downSp.takes.map((t) => t.why));
 ok("空头趋势：仍保留日内位（混合档）", hasIntra, downSp.takes.map((t) => t.why));
 
+
+/* ---------- 33) 一键建议：填了持仓成本 → 含回本档；没填 → 明确提示 ---------- */
+console.log("\n[一键建议回本档提示]");
+const h9 = makeHarness(
+  { code: "hk06166", watch: ["hk06166"], sound: false, chartMode: "min",
+    pos: { hk06166: { shares: 200, cost: 96.7, realized: 0 } }, plans: {}, trade: {}, lastFired: {} },
+  (code) => (code === "hk06166" ? hkPayload() : null));
+let threw9 = null;
+try { h9.run(coreSrc); h9.run(uiSrc); } catch (e) { threw9 = e; }
+ok("回本档场景：脚本无异常", !threw9, threw9 && threw9.message);
+await new Promise((r) => setTimeout(r, 350));
+h9.byId("btnEditPlan").listeners.click[0]();
+h9.byId("btnPlanSuggest").listeners.click[0]();
+const tip9 = h9.txt("planSuggestTip");
+ok("填了持仓（200 股 @96.7）→ 提示含回本档", tip9.indexOf("含回本档") >= 0 && tip9.indexOf("96.7") >= 0, tip9);
+ok("回本档：减仓2 区间包住成本价", (function () {
+  const lo = Number(h9.byId("fT2lo").value);
+  const hi = Number(h9.byId("fT2hi").value);
+  return lo > 0 && lo <= 96.7 && hi >= 96.7;
+})(), [h9.byId("fT2lo").value, h9.byId("fT2hi").value]);
+
+const h10 = makeHarness(
+  { code: "hk06166", watch: ["hk06166"], sound: false, chartMode: "min", pos: {}, plans: {}, trade: {}, lastFired: {} },
+  (code) => (code === "hk06166" ? hkPayload() : null));
+try { h10.run(coreSrc); h10.run(uiSrc); } catch (e) {}
+await new Promise((r) => setTimeout(r, 350));
+h10.byId("btnEditPlan").listeners.click[0]();
+h10.byId("btnPlanSuggest").listeners.click[0]();
+const tip10 = h10.txt("planSuggestTip");
+ok("没填持仓 → 提示说明需要先填股数+成本", tip10.indexOf("未填持仓") >= 0, tip10);
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
