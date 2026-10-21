@@ -1190,5 +1190,39 @@ ok("渲染：验证卡场景无异常", !threw13, threw13 && threw13.message);
 await new Promise((r) => setTimeout(r, 300));
 ok("渲染：验证卡显示样本统计", h13.deep("trackBox").indexOf("样本") >= 0, h13.deep("trackBox").slice(0, 120));
 
+
+/* ---------- 36) 分组统计 / 30-60 日 / CSV ---------- */
+console.log("\n[建仓验证进阶]");
+const eaG = { ok: true, hasPosition: false, zones: [{ lo: 67.2, hi: 68.1, why: "支撑带" }], stop: 66, target: 70, rr: 2, capital: 30000, suitable: "yes", verdict: "可以建仓" };
+const eaS = { ok: true, hasPosition: false, zones: [{ lo: 67.2, hi: 68.1, why: "支撑带" }], stop: 66, target: 70, rr: 2, capital: 30000, suitable: "small", verdict: "小仓试" };
+const eaN = { ok: true, hasPosition: false, zones: [{ lo: 67.2, hi: 68.1, why: "支撑带" }], stop: 66, target: 70, rr: 0.5, capital: 30000, suitable: "no", verdict: "不建议建仓" };
+const g1 = C.entryTrackAdd([], eaG, "sz000001", "A", Date.now(), 68);
+const g2 = C.entryTrackAdd([], eaS, "sz000002", "B", Date.now(), 68);
+const g3 = C.entryTrackAdd([], eaN, "sz000003", "C", Date.now(), 68);
+const gAll = [].concat(g1, g2, g3);
+const tdG = C.todayStr();
+const mkg = (extra) => [{ date: tdG, o: 68, h: 68.2, l: 67.5, c: 68 }].concat(extra);
+C.entryTrackEval(gAll, "sz000001", mkg([{ date: "2026-10-22", o: 68, h: 69, l: 67, c: 68.5 }, { date: "2026-10-23", o: 68.5, h: 71, l: 68, c: 70.5 }, { date: "2026-10-26", o: 70, h: 70.2, l: 69, c: 70 }]), Date.now());
+C.entryTrackEval(gAll, "sz000002", mkg([{ date: "2026-10-22", o: 67, h: 67.2, l: 65.5, c: 66 }, { date: "2026-10-23", o: 66, h: 66.5, l: 65, c: 65.2 }, { date: "2026-10-26", o: 65.2, h: 65.5, l: 64.8, c: 65 }]), Date.now());
+C.entryTrackEval(gAll, "sz000003", mkg([{ date: "2026-10-22", o: 68.5, h: 69, l: 68.5, c: 68.8 }, { date: "2026-10-23", o: 68.8, h: 69.2, l: 68.6, c: 69 }, { date: "2026-10-26", o: 69, h: 69.3, l: 68.7, c: 69.1 }]), Date.now());
+const grpRes = C.entryTrackGroups(gAll);
+ok("分组统计：三组各自计数", grpRes["可以建仓"].count === 1 && grpRes["小仓试"].count === 1 && grpRes["不建议建仓"].count === 1, [grpRes["可以建仓"].count, grpRes["小仓试"].count, grpRes["不建议建仓"].count]);
+ok("分组统计：可以建仓组到目标", grpRes["可以建仓"].hit === 1, grpRes["可以建仓"]);
+ok("分组统计：小仓试组止损", grpRes["小仓试"].stopped === 1, grpRes["小仓试"]);
+ok("分组统计：不建议组建仓触发率 0", grpRes["不建议建仓"].triggered === 0, grpRes["不建议建仓"]);
+const tr30 = C.entryTrackAdd([], eaG, "sz000004", "D", Date.now(), 68);
+const bars30 = [{ date: tdG, o: 68, h: 68.2, l: 67.5, c: 68 }];
+for (let i = 1; i <= 60; i++) bars30.push({ date: "d" + i, o: 68, h: 69, l: 67, c: 68 + i * 0.05 });
+C.entryTrackEval(tr30, "sz000004", bars30, Date.now());
+ok("30日/60日收益回填", tr30[0].verify.ret30 != null && tr30[0].verify.ret60 != null, [tr30[0].verify.ret30, tr30[0].verify.ret60]);
+ok("60 天样本不再重复验证", C.entryTrackPending(tr30, 5).length === 0, C.entryTrackPending(tr30, 5).length);
+ok("未满 60 天的记录仍会验证", C.entryTrackPending(gAll, 5).length === 3, C.entryTrackPending(gAll, 5).length);
+const csv = C.entryTrackCsv(gAll);
+const csvLines = csv.split("\n");
+ok("CSV 表头正确", csvLines[0].indexOf("日期") === 0 && csvLines[0].indexOf("30日%") > 0, csvLines[0]);
+ok("CSV 行数 = 表头 + 记录数", csvLines.length === 4, csvLines.length);
+ok("CSV 含结论与触发标记", csvLines[1].indexOf("可以建仓") > 0 && csvLines[1].split(",")[9] === "1", csvLines[1]);
+ok("页面含导出按钮", html.includes("btnTrackExport") && html.includes("导出 CSV"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
