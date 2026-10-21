@@ -265,6 +265,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 </div>
 
 <div class="card">
+  <div class="card-title"><b>建仓验证（回测）</b><span class="sp"></span><span id="trackMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="trackBox"></div>
+</div>
+
+<div class="card">
   <div class="card-title"><b>洗盘 / 出货检测</b><span class="sp"></span><span id="washMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="washBox"></div>
 </div>
@@ -2193,6 +2198,91 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       out.note = "区间是挂单参考（下沿附近买），不是必须成交价；止损必须执行。";
       return out;
     }
+
+    /** 建仓验证：记录一条建仓建议（用于次日/隔日回测，验证规则有效性） */
+    function entryTrackAdd(list, ea, code, name, nowMs, price) {
+      const recs = Array.isArray(list) ? list.slice() : [];
+      if (!ea || !ea.ok || ea.hasPosition) return recs;
+      recs.push({
+        id: nowMs + ":" + (recs.length + 1),
+        ts: nowMs, date: todayStr(), code: code || "",
+        name: name || "", verdict: ea.verdict, suitable: ea.suitable,
+        zones: (ea.zones || []).map((z) => ({ lo: z.lo, hi: z.hi, why: z.why })),
+        stop: ea.stop, target: ea.target, rr: ea.rr, price: price || null,
+        capital: ea.capital, status: "pending", verify: null
+      });
+      return recs.slice(-40);
+    }
+
+    /** 用日线回填建仓验证：是否触发、到目标/止损、3日/5日收益 */
+    function entryTrackEval(list, code, bars, nowMs) {
+      if (!Array.isArray(list) || !Array.isArray(bars) || !bars.length) return list;
+      for (const r of list) {
+        if (!r || r.status !== "pending" || r.code !== code) continue;
+        const idx = bars.findIndex((b) => b.date === r.date);
+        if (idx < 0) continue;
+        const after = bars.slice(idx + 1);
+        if (!after.length) continue;
+        const zHi = r.zones && r.zones.length ? r.zones[0].hi : r.price;
+        const entry = r.zones && r.zones.length ? (r.zones[0].lo + r.zones[0].hi) / 2 : r.price;
+        const stop = r.stop, target = r.target;
+        let triggered = false, tIdx = -1;
+        for (let i = 0; i < after.length && i < 5; i++) {
+          if (zHi != null && after[i].l <= zHi) { triggered = true; tIdx = i; break; }
+        }
+        const v = { checkedAt: nowMs, days: Math.min(after.length, 5), triggered: triggered, hit: false, stopped: false, ret3: null, ret5: null, closeJudge: null };
+        if (entry) {
+          if (after.length >= 3) v.ret3 = (after[2].c / entry - 1) * 100;
+          if (after.length >= 5) v.ret5 = (after[4].c / entry - 1) * 100;
+        }
+        if (triggered) {
+          for (let i = tIdx; i < after.length && i < tIdx + 5; i++) {
+            const b = after[i];
+            if (stop != null && b.l <= stop) { v.stopped = true; v.closeJudge = "stop"; break; }
+            if (target != null && b.h >= target) { v.hit = true; v.closeJudge = "target"; break; }
+          }
+          if (!v.closeJudge && after.length >= tIdx + 5) v.closeJudge = "timeout";
+        } else if (after.length >= 3) {
+          v.closeJudge = "no-trigger";
+        }
+        r.verify = v;
+        if (v.closeJudge) r.status = "closed";
+      }
+      return list;
+    }
+
+    /** 建仓验证统计：触发率、到目标率、3日/5日平均收益 */
+    function entryTrackStats(list) {
+      const recs = (list || []).filter((r) => r && r.verify && r.verify.days >= 3);
+      const out = { total: recs.length, triggered: 0, hit: 0, stopped: 0, notTriggered: 0, winRate: null, avg3: null, avg5: null };
+      let s3 = 0, n3 = 0, s5 = 0, n5 = 0;
+      for (const r of recs) {
+        const v = r.verify;
+        if (v.triggered) out.triggered++; else out.notTriggered++;
+        if (v.hit) out.hit++;
+        if (v.stopped) out.stopped++;
+        if (v.ret3 != null) { s3 += v.ret3; n3++; }
+        if (v.ret5 != null) { s5 += v.ret5; n5++; }
+      }
+      if (out.triggered) out.winRate = (out.hit / out.triggered) * 100;
+      if (n3) out.avg3 = s3 / n3;
+      if (n5) out.avg5 = s5 / n5;
+      return out;
+    }
+
+    /** 待验证的记录（按代码去重，取最早） */
+    function entryTrackPending(list, max) {
+      const seen = {}, out = [];
+      for (const r of (list || [])) {
+        if (!r || r.status !== "pending" || !r.code) continue;
+        if (seen[r.code]) continue;
+        seen[r.code] = 1;
+        out.push(r);
+        if (max && out.length >= max) break;
+      }
+      return out;
+    }
+
     function suggestPlan(m, refs, mp, ctx3, pos, code, opt) {
       const o = opt || {};
       const lot = lotOf(code);
@@ -2704,6 +2794,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     tickOf: tickOf, roundTick: roundTick,
     attachPoolLive: attachPoolLive,
     entryAdvice: entryAdvice,
+    entryTrackAdd: entryTrackAdd, entryTrackEval: entryTrackEval, entryTrackStats: entryTrackStats, entryTrackPending: entryTrackPending,
     buildBackup: buildBackup, parseBackup: parseBackup,
     chgClass: chgClass,
     fmtLocalTime: fmtLocalTime,
@@ -2723,7 +2814,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.33 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.34 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2756,6 +2847,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   st.ledger = st.ledger || { records: [] };
   st.capital = st.capital || {};
   st.briefs = st.briefs || {};
+  st.entryTrack = st.entryTrack || [];
   st.eventRisk = st.eventRisk || false;
   if (st.watch.indexOf(st.code) < 0) st.watch.unshift(st.code);
 
@@ -3135,6 +3227,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var points = allPointsNow();
     var refs = C.intradayRefs(metrics, points, pos, { code: st.code, plan: curPlan() });
     var ea = C.entryAdvice(metrics, points, mpData, ctx3Data, refs, lastSetup, dailyData, orderData, pos, st.code, { capital: curCapital() });
+    lastEntryAdvice = ea;
     if (ea.hasPosition) {
       box.innerHTML = '<div class="sigwhy">' + ea.verdict + "：建仓建议只对空仓给出；持仓风控见「智能信号 / 交易计划」。</div>";
       if (meta) meta.textContent = "有持仓";
@@ -3155,9 +3248,19 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     html += '<div class="sigwhy">本金 ' + Math.round(ea.capital) + " · 满仓上限 " + ea.fullPos + " 股 · 按止损风险约 " + (ea.riskAmount == null ? "--" : ea.riskAmount) + " 元 · 带宽 ±" + (ea.bandPct == null ? "--" : ea.bandPct) + "%</div>";
     if (ea.waitFor.length) html += '<div class="sigwhy">先等条件：' + ea.waitFor.join(" · ") + "</div>";
     html += '<div class="sigwhy" style="font-size:10.5px">' + ea.note + "</div>";
-    html += '<div><button class="ledclear" id="btnEntryPlan">填入建仓计划</button></div>';
+    html += '<div class="tradebar"><button class="ledclear" id="btnEntryPlan">填入建仓计划</button>' +
+      '<button class="ledclear" id="btnEntryTrack">记录到验证清单</button></div>';
     box.innerHTML = html;
     if (meta) meta.textContent = ea.suitable === "yes" ? "可以建仓" : ea.suitable === "small" ? "小仓试" : "不建议建仓";
+    var bt = $("btnEntryTrack");
+    if (bt) bt.addEventListener("click", function () {
+      if (!ea.ok || ea.hasPosition) { alert("只有空仓时才能记录建仓建议"); return; }
+      var nm = (parsed && parsed.quote && parsed.quote.name) || "";
+      st.entryTrack = C.entryTrackAdd(st.entryTrack, ea, st.code, nm, Date.now(), metrics ? metrics.price : null);
+      save({ entryTrack: st.entryTrack });
+      renderEntryTrackCard();
+      alert("已记录：明天开盘后自动用日线回填「是否触发 / 到目标 / 3日5日收益」");
+    });
     var b = $("btnEntryPlan");
     if (b) b.addEventListener("click", function () {
       var buys = [];
@@ -3175,6 +3278,62 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       save({ plans: st.plans });
       renderPlanSummary();
       alert("已生成建仓计划：共 " + ea.maxShares + " 股 · 止损 " + ea.stop);
+    });
+  }
+
+
+  function renderEntryTrackCard() {
+    var box = $("trackBox"), meta = $("trackMeta");
+    if (!box) return;
+    var list = st.entryTrack || [];
+    var stat = C.entryTrackStats(list);
+    var html = "";
+    if (!list.length) {
+      html += '<div class="sigwhy">暂无记录：在「建仓建议」卡里点「记录到验证清单」，次日自动回填结果。</div>';
+    } else {
+      html += '<div class="sigwhy">样本 ' + stat.total + " · 触发 " + stat.triggered + " · 到目标 " + stat.hit +
+        " · 止损 " + stat.stopped + " · 未触发 " + stat.notTriggered +
+        (stat.winRate == null ? "" : " · 触发后胜率 " + stat.winRate.toFixed(0) + "%") +
+        (stat.avg3 == null ? "" : " · 3日均 " + (stat.avg3 >= 0 ? "+" : "") + stat.avg3.toFixed(2) + "%") +
+        (stat.avg5 == null ? "" : " · 5日均 " + (stat.avg5 >= 0 ? "+" : "") + stat.avg5.toFixed(2) + "%") + "</div>";
+      var rows = list.slice(-8).reverse();
+      rows.forEach(function (r) {
+        var v = r.verify;
+        var stTxt, cls = "sigwhy";
+        if (!v) stTxt = "待验证";
+        else if (!v.triggered) { stTxt = "未触发（" + v.days + "日）"; }
+        else if (v.hit) { stTxt = "✓ 到目标"; cls = "sigwhy"; }
+        else if (v.stopped) { stTxt = "✗ 止损"; }
+        else stTxt = v.closeJudge === "timeout" ? "… 5日未达标" : "跟踪中";
+        var z = r.zones && r.zones[0] ? r.zones[0].lo + "–" + r.zones[0].hi : "--";
+        var ret = v ? (v.ret3 != null ? "3日 " + (v.ret3 >= 0 ? "+" : "") + v.ret3.toFixed(2) + "%" : "") + (v.ret5 != null ? " · 5日 " + (v.ret5 >= 0 ? "+" : "") + v.ret5.toFixed(2) + "%" : "") : "";
+        html += '<div class="washrow"><span class="lw">' + r.date.slice(5) + " " + (r.name || r.code) + "</span><span>" + z + " · " + r.verdict + " · " + stTxt + (ret ? " · " + ret : "") + "</span></div>";
+      });
+      html += '<div><button class="ledclear" id="btnTrackClear">清空验证清单</button></div>';
+    }
+    box.innerHTML = html;
+    if (meta) meta.textContent = list.length ? "样本 " + stat.total : "无记录";
+    var bc = $("btnTrackClear");
+    if (bc) bc.addEventListener("click", function () {
+      if (!confirm("清空建仓验证记录？")) return;
+      st.entryTrack = []; save({ entryTrack: st.entryTrack }); renderEntryTrackCard();
+    });
+  }
+
+  function verifyEntryTrack() {
+    var pend = C.entryTrackPending(st.entryTrack || [], 2);
+    if (!pend.length) return;
+    pend.forEach(function (r) {
+      fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=" + r.code + ",day,,,120,qfq", { cache: "no-store" })
+        .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+        .then(function (j) {
+          var k = C.parseTencentKline(j, r.code);
+          if (!k || !k.bars || !k.bars.length) return;
+          C.entryTrackEval(st.entryTrack, r.code, k.bars, Date.now());
+          save({ entryTrack: st.entryTrack });
+          renderEntryTrackCard();
+        })
+        .catch(function () {});
     });
   }
 
@@ -3815,6 +3974,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   var historyPoints = null, historyAt = 0, historyCode = "", mpData = null, ctx3Data = null;
   var dailyData = null, dailyAt = 0, dailyCode = "", orderData = null, orderAt = 0, indexData = null, indexAt = 0;
   var poolBuilding = false, poolAutoDate = "", poolRetryCount = 0, poolAutoCount = 0;
+  var lastEntryAdvice = null, lastTrackVerify = 0;
   var poolLive = {}, poolLiveAt = 0, poolLiveKey = "";
   var failStreak = 0;
   function allPointsNow() {
@@ -4164,6 +4324,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         render(metrics, p.points);
         try { renderSignalCard(); } catch (e) { /* 指标不足时不阻塞行情 */ }
         try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
+        try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
+        try { if (Date.now() - lastTrackVerify > 60000) { lastTrackVerify = Date.now(); verifyEntryTrack(); } } catch (e) {}
         try { ensureBriefs(); renderBriefCard(); } catch (e) { /* 简报失败不阻塞 */ }
         if (historyCode !== requested || !historyPoints || Date.now() - historyAt > 180000) {
           fetchHistory(requested).then(function (pts) {
@@ -4221,6 +4383,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     $("codeInput").value = C.displayCode(code);
     renderChips(); renderPlanSummary(); bindPosInputs(); renderLocalCard();
   try { renderEntryCard(); } catch (e) {}
+  try { renderEntryTrackCard(); } catch (e) {}
     $("px").textContent = "读取中…"; $("px").className = "px flat"; $("chg").textContent = C.displayCode(code);
     try { renderBriefCard(); } catch (e) {}
     tick(true);

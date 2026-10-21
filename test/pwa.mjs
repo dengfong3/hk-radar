@@ -1155,5 +1155,40 @@ try { h12.run(coreSrc); h12.run(uiSrc); } catch (e) {}
 await new Promise((r) => setTimeout(r, 300));
 ok("渲染：有持仓时显示已有持仓提示", h12.deep("entryBox").indexOf("已有持仓") >= 0, h12.deep("entryBox").slice(0, 120));
 
+
+/* ---------- 35) 建仓验证回测 ---------- */
+console.log("\n[建仓验证回测]");
+ok("导出 entryTrack 四件套", !!(C.entryTrackAdd && C.entryTrackEval && C.entryTrackStats && C.entryTrackPending));
+const eaFix = { ok: true, hasPosition: false, zones: [{ lo: 67.2, hi: 68.1, why: "支撑带" }], stop: 66.0, target: 70.0, rr: 2.0, capital: 30000, suitable: "yes", verdict: "可以建仓", maxShares: 300 };
+const tr1 = C.entryTrackAdd([], eaFix, "sz301218", "华是科技", Date.now(), 68.0);
+ok("记录一条建仓建议", tr1.length === 1 && tr1[0].status === "pending" && tr1[0].zones[0].hi === 68.1, tr1[0] && tr1[0].code);
+ok("有持仓的建议不记录", C.entryTrackAdd([], { ok: true, hasPosition: true }, "sz301218", "x", Date.now(), 68).length === 0);
+const today0 = C.todayStr();
+const mkVBar = (rows) => rows.map((r) => ({ date: r[0], o: r[1], h: r[2], l: r[3], c: r[4], v: 1000 }));
+const barsHit = mkVBar([[today0, 68, 68.2, 67.5, 68], ["2026-10-22", 68, 69, 67.0, 68.5], ["2026-10-23", 68.5, 71, 68, 70.5], ["2026-10-26", 70, 70.2, 69, 70], ["2026-10-27", 70, 70.5, 69.5, 70.2], ["2026-10-28", 70.2, 70.6, 69.8, 70.4]]);
+C.entryTrackEval(tr1, "sz301218", barsHit, Date.now());
+ok("触发 + 到目标", tr1[0].verify.triggered === true && tr1[0].verify.hit === true && tr1[0].status === "closed", tr1[0].verify);
+ok("3日/5日收益回填", tr1[0].verify.ret3 != null && tr1[0].verify.ret5 != null, [tr1[0].verify.ret3, tr1[0].verify.ret5]);
+const tr2 = C.entryTrackAdd([], eaFix, "sz000001", "测试", Date.now(), 68.0);
+const barsStop = mkVBar([[today0, 68, 68.2, 67.5, 68], ["2026-10-22", 67, 67.2, 65.5, 66], ["2026-10-23", 66, 66.5, 65, 65.2], ["2026-10-26", 65.2, 65.5, 64.8, 65.0]]);
+C.entryTrackEval(tr2, "sz000001", barsStop, Date.now());
+ok("触发后跌破止损 → stopped", tr2[0].verify.stopped === true, tr2[0].verify);
+const tr3 = C.entryTrackAdd([], eaFix, "sz000002", "测试2", Date.now(), 68.0);
+const barsNo = mkVBar([[today0, 68, 68.2, 68.2, 68], ["2026-10-22", 68.5, 69, 68.5, 68.8], ["2026-10-23", 68.8, 69.2, 68.6, 69], ["2026-10-26", 69, 69.3, 68.7, 69.1]]);
+C.entryTrackEval(tr3, "sz000002", barsNo, Date.now());
+ok("未触发 → no-trigger", tr3[0].verify.triggered === false && tr3[0].verify.closeJudge === "no-trigger", tr3[0].verify);
+const estats = C.entryTrackStats([].concat(tr1, tr2, tr3));
+ok("统计：样本/触发/到目标/止损", estats.total === 3 && estats.triggered === 2 && estats.hit === 1 && estats.stopped === 1, estats);
+ok("统计：触发后胜率 50%", Math.round(estats.winRate) === 50, estats.winRate);
+ok("待验证去重", C.entryTrackPending([{ code: "a", status: "pending" }, { code: "a", status: "pending" }, { code: "b", status: "pending" }], 5).length === 2);
+ok("页面含建仓验证卡片", html.includes('id="trackBox"') && html.includes("建仓验证（回测）"));
+const h13 = makeHarness({ code: "sh603083", watch: ["sh603083"], sound: false, chartMode: "min", pos: {}, plans: {}, trade: {}, lastFired: {}, entryTrack: tr1 },
+  (code) => (code === "sh603083" ? aSharePayload() : null));
+let threw13 = null;
+try { h13.run(coreSrc); h13.run(uiSrc); } catch (e) { threw13 = e; }
+ok("渲染：验证卡场景无异常", !threw13, threw13 && threw13.message);
+await new Promise((r) => setTimeout(r, 300));
+ok("渲染：验证卡显示样本统计", h13.deep("trackBox").indexOf("样本") >= 0, h13.deep("trackBox").slice(0, 120));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
