@@ -1119,5 +1119,41 @@ h10.byId("btnPlanSuggest").listeners.click[0]();
 const tip10 = h10.txt("planSuggestTip");
 ok("没填持仓 → 提示说明需要先填股数+成本", tip10.indexOf("未填持仓") >= 0, tip10);
 
+
+/* ---------- 34) 空仓建仓建议 ---------- */
+console.log("\n[空仓建仓建议]");
+ok("导出 entryAdvice", typeof C.entryAdvice === "function");
+const eaM = { price: 68.0, high: 70.0, low: 66.0, prevClose: 66.5, vwap: 68.2, vwapDevPct: 0.5, volRatio: 1.2 };
+const eaRefs = { ok: true, reduce: [{ price: 69.5, why: "整数关口", qty: 0 }], add: [{ price: 67.2, why: "均价-1.2σ", qty: 0 }, { price: 66.6, why: "前低", qty: 0 }] };
+const eaPts = synth(2, 240, 0.01);
+const eaMp = C.multiPeriod(eaPts);
+const eaNoPos = C.entryAdvice(eaM, eaPts, eaMp, null, eaRefs, { ok: true, grade: "B", score: 75, side: "long", vetoes: [], reasons: ["日线趋势向上"] }, { ok: true, trend: "up", ma20: 64, ma60: 55 }, null, { shares: 0, cost: 0 }, "sz301218", { capital: 30000 });
+ok("空仓：返回建议且非 hasPosition", eaNoPos.ok === true && eaNoPos.hasPosition === false, eaNoPos.verdict);
+ok("空仓：给出是否适合建仓", eaNoPos.suitable === "yes" && eaNoPos.verdict.indexOf("可以") >= 0, eaNoPos.verdict);
+ok("空仓：给出建仓区间（低于现价）", eaNoPos.zones.length >= 1 && eaNoPos.zones[0].lo < 68.0, eaNoPos.zones);
+ok("空仓：给出止损/目标/盈亏比", eaNoPos.stop > 0 && eaNoPos.stop < 68.0 && eaNoPos.target > 68.0 && eaNoPos.rr > 0, [eaNoPos.stop, eaNoPos.target, eaNoPos.rr]);
+ok("空仓：仓位按本金 3 万分配且为整手", eaNoPos.maxShares > 0 && eaNoPos.maxShares % 100 === 0 && eaNoPos.zones.reduce((a, z) => a + z.shares, 0) === eaNoPos.maxShares, [eaNoPos.maxShares, eaNoPos.zones.map((z) => z.shares)]);
+const eaHasPos = C.entryAdvice(eaM, eaPts, eaMp, null, eaRefs, null, null, null, { shares: 300, cost: 70 }, "sz301218", { capital: 30000 });
+ok("有持仓：明确返回 hasPosition", eaHasPos.hasPosition === true && eaHasPos.verdict.indexOf("已有持仓") >= 0, eaHasPos.verdict);
+const eaNoTrade = C.entryAdvice(eaM, eaPts, eaMp, null, eaRefs, { ok: true, grade: "noTrade", side: "none", vetoes: ["震荡区（多周期方向不一致）：不交易", "盈亏比 0.5 < 2：不值当"], reasons: [] }, { ok: true, trend: "down", ma20: 80, ma60: 90 }, null, { shares: 0, cost: 0 }, "sz301218", { capital: 30000 });
+ok("不适合：给出原因与等待条件", eaNoTrade.suitable === "no" && eaNoTrade.vetoes.length > 0 && eaNoTrade.waitFor.length > 0, [eaNoTrade.verdict, eaNoTrade.waitFor]);
+ok("页面含建仓建议卡片", html.includes('id="entryBox"') && html.includes("建仓建议（空仓时）"));
+
+// 渲染：空仓 vs 有仓
+const h11 = makeHarness({ code: "sh603083", watch: ["sh603083"], sound: false, chartMode: "min", pos: {}, plans: {}, trade: {}, lastFired: {} },
+  (code) => (code === "sh603083" ? aSharePayload() : null));
+let threw11 = null;
+try { h11.run(coreSrc); h11.run(uiSrc); } catch (e) { threw11 = e; }
+ok("渲染：空仓场景无异常", !threw11, threw11 && threw11.message);
+await new Promise((r) => setTimeout(r, 300));
+ok("渲染：空仓显示建仓建议", h11.deep("entryBox").indexOf("建仓") >= 0, h11.deep("entryBox").slice(0, 120));
+
+const h12 = makeHarness({ code: "sh603083", watch: ["sh603083"], sound: false, chartMode: "min",
+  pos: { sh603083: { shares: 100, cost: 175, realized: 0 } }, plans: {}, trade: {}, lastFired: {} },
+  (code) => (code === "sh603083" ? aSharePayload() : null));
+try { h12.run(coreSrc); h12.run(uiSrc); } catch (e) {}
+await new Promise((r) => setTimeout(r, 300));
+ok("渲染：有持仓时显示已有持仓提示", h12.deep("entryBox").indexOf("已有持仓") >= 0, h12.deep("entryBox").slice(0, 120));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
