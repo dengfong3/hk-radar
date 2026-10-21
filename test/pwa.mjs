@@ -1068,5 +1068,25 @@ ok("港股计划价对齐 0.05", (function () {
   return vals.every((v) => Math.abs(v / 0.05 - Math.round(v / 0.05)) < 1e-9);
 })(), hkPlan.takes.map((t) => [t.lo, t.hi]));
 
+
+/* ---------- 32) 回本减仓档 + 日线优先 ---------- */
+console.log("\n[回本档与日线优先]");
+const hkPos = { shares: 200, cost: 96.7 };
+const hkPlan2 = C.suggestPlan({ price: 85.4, high: 85.45, low: 81.55, prevClose: 78.85 }, hkRefs, { keySup: [78.85] }, null, hkPos, "hk06166", {});
+ok("浮亏时生成回本减仓档", hkPlan2.breakevenPrice === 96.7 && hkPlan2.takes.some((t) => t.isBreakeven), hkPlan2.takes.map((t) => [t.lo, t.hi, t.why]));
+ok("回本档区间包住成本价", (function () {
+  const t = hkPlan2.takes.find((x) => x.isBreakeven);
+  return t && t.lo <= 96.7 && t.hi >= 96.7;
+})(), hkPlan2.takes);
+ok("回本档按价格升序排列", hkPlan2.takes.every((t, i) => i === 0 || t.lo >= hkPlan2.takes[i - 1].hi), hkPlan2.takes.map((t) => [t.lo, t.hi]));
+ok("成本低于现价时不生成回本档", C.suggestPlan({ price: 85.4, high: 85.45, low: 81.55, prevClose: 78.85 }, hkRefs, { keySup: [78.85] }, null, { shares: 200, cost: 80 }, "hk06166", {}).breakevenPrice === null);
+
+const downSp = C.suggestPlan(planM, planRefs, planMp, null, { shares: 1000, cost: 96 }, "sh603083",
+  { points: planPts, daily: { ok: true, trend: "down", ma20: 105, ma60: 108, high20: 106, high60: 112, low20: 95, low60: 90 } });
+const hasDaily = downSp.takes.some((t) => (t.why || "").indexOf("日线") >= 0 || (t.why || "").indexOf("20日") >= 0 || (t.why || "").indexOf("60日") >= 0);
+const hasIntra = downSp.takes.some((t) => (t.why || "").indexOf("日线") < 0 && (t.why || "").indexOf("20日") < 0 && (t.why || "").indexOf("60日") < 0);
+ok("空头趋势：减仓档包含日线关键位", hasDaily, downSp.takes.map((t) => t.why));
+ok("空头趋势：仍保留日内位（混合档）", hasIntra, downSp.takes.map((t) => t.why));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

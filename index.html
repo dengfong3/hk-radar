@@ -2086,7 +2086,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       const out = { takes: [], buys: [], reds: [], maxShares: null, lossBudget: budget,
         hardStopFloor: null, vwapBand: 1.5, roundTripCostPct: 1.2, levels: [], suggested: true,
         capital, fullPos: null, riskCap: null, stopMode: null, atr: null,
-        bandPct: null, tick: null, tiers: 0 };
+        bandPct: null, tick: null, tiers: 0, breakevenPrice: null };
       if (!price || !refs || !refs.ok) return out;
 
       // 1) 动态带宽：0.5×15分ATR%，夹在 0.6%–1.5%（开盘初期 ATR 为空 → 取下限 0.6%）
@@ -2123,7 +2123,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
       const dy = o.daily && o.daily.ok ? o.daily : null;
 
-      // 5) 减仓候选：日内最近 2 档 → 日线关键位 → 其余日内位；间距不足即跳过
+      // 5) 减仓候选：回本档（持仓成本高于现价时优先）→ 最近日线位（空头趋势优先）→ 最近日内位；间距不足即跳过
       const intra = (refs.reduce || []).slice().sort((a, b) => a.price - b.price);
       const dailyC = [];
       if (dy) {
@@ -2134,10 +2134,25 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         addR(dy.high60, "60日高点");
       }
       dailyC.sort((a, b) => a.price - b.price);
+      // 回本档：持仓成本高于现价时，成本价是最重要的减仓目标（不是风控减仓）
+      const breakeven = [];
+      const cost = pos && Number(pos.cost) > 0 ? Number(pos.cost) : 0;
+      if (cost > price * 1.005) {
+        breakeven.push({ price: cost, why: "回本减仓（成本 " + (Math.round(cost * 100) / 100) + "）", conf: "中", qty: 0, kind: "breakeven" });
+      }
+      out.breakevenPrice = breakeven.length ? breakeven[0].price : null;
+      const trend = dy && dy.trend ? dy.trend : "flat";
       const priority = [];
-      intra.slice(0, 2).forEach((x) => priority.push(x));
-      dailyC.forEach((x) => priority.push(x));
-      intra.slice(2).forEach((x) => priority.push(x));
+      breakeven.forEach((x) => priority.push(x));
+      if (trend === "down") {
+        dailyC.slice(0, 1).forEach((x) => priority.push(x));
+        intra.slice(0, 1).forEach((x) => priority.push(x));
+      } else {
+        intra.slice(0, 1).forEach((x) => priority.push(x));
+        dailyC.slice(0, 1).forEach((x) => priority.push(x));
+      }
+      intra.slice(1).forEach((x) => priority.push(x));
+      dailyC.slice(1).forEach((x) => priority.push(x));
       const kept = [];
       for (const c of priority) {
         if (kept.length >= takeLimit) break;
@@ -2148,10 +2163,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       kept.sort((a, b) => a.price - b.price);
       kept.forEach((r, i) => {
         const z = zone(r.price);
+        const isBE = r.kind === "breakeven";
         out.takes.push({ id: "T" + (i + 1), lo: z.lo, hi: z.hi,
-          short: i === takeLimit - 1 && takeLimit > 1 ? "清剩余" : "减 " + (i + 1) + " 档",
+          short: isBE ? "回本减仓" : (i === takeLimit - 1 && takeLimit > 1 ? "清剩余" : "减 " + (i + 1) + " 档"),
           label: r.why + " · 建议减 " + (r.qty > 0 ? r.qty + " 股" : "观察"),
-          why: r.why, conf: r.conf || "中" });
+          why: r.why, conf: r.conf || "中", kind: r.kind || "risk", isBreakeven: isBE });
       });
 
       // 6) 加仓档：最多 2 档，同样按间距合并
@@ -2590,7 +2606,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.30 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.31 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4149,7 +4165,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (tip) tip.textContent = "已填入建议：减仓 " + sp.takes.length + " 档 · 加仓 " + sp.buys.length +
       " 档 · 止损 " + (sp.reds[0] ? sp.reds[0].at : "—") + " · 仓位上限 " + sp.maxShares +
       " 股（满仓 " + sp.fullPos + " / 预算允许 " + sp.riskCap + "）· 区间带宽 ±" + (sp.bandPct == null ? "--" : sp.bandPct) +
-      "%（按 ATR 动态）· 止损方式 " + (sp.stopMode || "--") + "。请核对后点「保存计划」。";
+      "%（按 ATR 动态）· 止损方式 " + (sp.stopMode || "--") +
+      (sp.breakevenPrice ? " · 含回本档 " + sp.breakevenPrice : "") + "。请核对后点「保存计划」。";
   });
 
   $("btnPlanClear").addEventListener("click", function () {
