@@ -1253,5 +1253,22 @@ const badAdvice = C.entryAdvice({ price: 40.2, high: 40.3, low: 39.9, prevClose:
 const vTxt = (badAdvice.vetoes || []).join("|");
 ok("建仓建议不再出现 10052.8% 的追高误报", vTxt.indexOf("10052") < 0 && vTxt.indexOf("10052.8") < 0, vTxt.slice(0, 120));
 
+
+/* ---------- 38) 自选显示股票名称 ---------- */
+console.log("\n[自选显示名称]");
+ok("页面含名称样式与拉取函数", html.includes("chipcol") && html.includes("cn-name") && html.includes("fetchWatchNames"));
+const hNm = makeHarness({
+  code: "sh603083", watch: ["sh603083", "hk06166"], sound: false, chartMode: "min",
+  names: { sh603083: "剑桥科技", hk06166: "腾讯控股" }, pos: {}, plans: {}, trade: {}, lastFired: {}
+}, (code) => (code === "sh603083" ? aSharePayload() : null));
+let threwNm = null;
+try { hNm.run(coreSrc); hNm.run(uiSrc); } catch (e) { threwNm = e; }
+ok("自选名称场景无异常", !threwNm, threwNm && threwNm.message);
+await new Promise((r) => setTimeout(r, 250));
+const chipsTxt = hNm.deep("chips");
+ok("自选 chip 显示名称（剑桥科技）", chipsTxt.indexOf("剑桥科技") >= 0, chipsTxt.slice(0, 120));
+ok("自选 chip 显示名称（腾讯控股）", chipsTxt.indexOf("腾讯控股") >= 0, chipsTxt.slice(0, 160));
+ok("自选 chip 仍显示代码", chipsTxt.indexOf("603083") >= 0, chipsTxt.slice(0, 120));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
