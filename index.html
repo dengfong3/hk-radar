@@ -314,6 +314,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="planbox" id="planSummary">未设置。点「编辑」填入你自己的减仓档与止损线——**本工具不会给你预设买卖点**。</div>
 </div>
 
+<div class="card">
+  <div class="card-title"><b>本机数据（自动保存）</b><span class="sp"></span><span id="localMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="localBox"></div>
+  <input type="file" id="backupFile" accept=".json,application/json" style="display:none">
+</div>
+
 <div class="disclaimer">
   <b>免责声明</b>：本页面仅为个人行情记录与纪律提醒工具，<b>不构成任何投资建议</b>，不承诺收益。
   行情来自第三方公开接口（腾讯），可能延迟、限流或中断，<b>下单请以券商报价为准</b>。
@@ -1693,6 +1699,20 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (pct < -0.005) return "cDown";
       return "cFlat";
     }
+
+    /** 本机备份：把状态序列化成可下载的 JSON（不包含任何服务端数据） */
+    function buildBackup(state, now) {
+      const payload = { app: "hk-radar-pwa", version: 1, at: now || Date.now(), state: state || {} };
+      return JSON.stringify(payload);
+    }
+    /** 恢复：解析备份文本，格式不对返回 null */
+    function parseBackup(text) {
+      try {
+        const o = JSON.parse(String(text || ""));
+        if (!o || o.app !== "hk-radar-pwa" || !o.state || typeof o.state !== "object" || Array.isArray(o.state)) return null;
+        return o.state;
+      } catch (e) { return null; }
+    }
     /** 观察池历史（按日期倒序），返回可直接渲染的行 */
     function poolHistoryLines(pools, limit) {
       const list = (pools || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, limit || 10);
@@ -2490,6 +2510,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     buildBrief: buildBrief, sessionPhase: sessionPhase, briefDeadlines: briefDeadlines, segmentStats: segmentStats, prevDailyBar: prevDailyBar,
     briefKey: briefKey,
     attachPoolLive: attachPoolLive,
+    buildBackup: buildBackup, parseBackup: parseBackup,
     chgClass: chgClass,
     fmtLocalTime: fmtLocalTime,
     parseSinaRank: parseSinaRank,
@@ -2508,17 +2529,23 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.28 · 2026-10-20";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.29 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
   function load() { try { return JSON.parse(localStorage.getItem(LS) || "{}") || {}; } catch (e) { return {}; } }
+  var saveError = "", savedAt = 0;
   function save(patch) {
     try {
       var cur = load();
       Object.keys(patch).forEach(function (k) { cur[k] = patch[k]; });
+      cur.savedAt = Date.now();
       localStorage.setItem(LS, JSON.stringify(cur));
-    } catch (e) { /* 隐私模式等 */ }
+      savedAt = cur.savedAt;
+      saveError = "";
+    } catch (e) {
+      saveError = (e && e.name) || "storage";
+    }
   }
 
   var st = load();
@@ -2815,6 +2842,56 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     });
     (b.risks || []).forEach(function (r) { html += '<div class="sigveto">⚠ ' + r + "</div>"; });
     return html;
+  }
+
+  function renderLocalCard() {
+    var box = $("localBox"), meta = $("localMeta");
+    if (!box) return;
+    var html = "";
+    var when = savedAt || (st && st.savedAt) || 0;
+    if (saveError) {
+      html += '<div class="sigveto">⚠ 本机保存失败（' + saveError + '）：可能是隐私模式或空间不足，请点下面「导出备份」保存到文件</div>';
+    } else {
+      html += '<div class="sigwhy">保存位置：本机浏览器（localStorage）· ' +
+        (when ? "最后保存 " + C.fmtLocalTime(when) : "尚未保存") + "</div>";
+    }
+    html += '<div class="sigwhy">换设备/清缓存/无痕模式会丢数据，建议定期导出备份；导入后自动恢复并刷新。</div>';
+    html += '<div class="tradebar"><button id="btnBackupExport">导出备份</button>' +
+      '<button id="btnBackupImport">导入备份</button></div>';
+    box.innerHTML = html;
+    if (meta) meta.textContent = saveError ? "保存失败" : (when ? "已保存" : "未保存");
+    var bExp = $("btnBackupExport"), bImp = $("btnBackupImport"), fImp = $("backupFile");
+    if (bExp) bExp.addEventListener("click", function () {
+      var txt = C.buildBackup(st, Date.now());
+      var name = "hk-radar-backup-" + C.todayStr().replace(/-/g, "") + "-" + new Date().toTimeString().slice(0, 5).replace(":", "") + ".json";
+      try {
+        var blob = new Blob([txt], { type: "application/json" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      } catch (e) { alert("导出失败：" + e.message); }
+    });
+    if (bImp && fImp) {
+      bImp.addEventListener("click", function () { fImp.click(); });
+      fImp.addEventListener("change", function () {
+        var f = fImp.files && fImp.files[0];
+        if (!f) return;
+        var fr = new FileReader();
+        fr.onload = function () {
+          var restored = C.parseBackup(fr.result);
+          if (!restored) { alert("备份文件格式不正确（应为 hk-radar 导出的 JSON）"); return; }
+          st = Object.assign(load(), restored);
+          save(st);
+          alert("已导入备份，页面将刷新");
+          location.reload();
+        };
+        fr.onerror = function () { alert("文件读取失败"); };
+        fr.readAsText(f);
+      });
+    }
   }
 
   function renderBriefCard() {
@@ -3896,7 +3973,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     save({ code: st.code, watch: st.watch });
     parsed = null; metrics = null; lastActive = {}; alertQueue = []; renderAlert();
     $("codeInput").value = C.displayCode(code);
-    renderChips(); renderPlanSummary(); bindPosInputs();
+    renderChips(); renderPlanSummary(); bindPosInputs(); renderLocalCard();
     $("px").textContent = "读取中…"; $("px").className = "px flat"; $("chg").textContent = C.displayCode(code);
     try { renderBriefCard(); } catch (e) {}
     tick(true);

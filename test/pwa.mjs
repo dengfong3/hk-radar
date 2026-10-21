@@ -1018,5 +1018,18 @@ ok("卡片标题为 14:50", html.indexOf("14:50 尾盘观察池") >= 0, "标题"
 ok("自动刷新间隔 3 分钟", html.indexOf("Date.now() - lastGen > 180000") >= 0, "刷新间隔");
 ok("卡片显示生成时间", html.indexOf("生成 \" +\n        (mine.genAt") >= 0 || html.indexOf("mine.genAt ? C.fmtLocalTime") >= 0, "生成时间");
 
+
+/* ---------- 30) 本机数据备份/恢复 ---------- */
+console.log("\n[本机数据备份]");
+ok("导出 buildBackup / parseBackup", typeof C.buildBackup === "function" && typeof C.parseBackup === "function");
+const bkState = { code: "sz300607", pos: { sz300607: { shares: 1000, cost: 27.5 } }, ledger: { records: [{ id: "1" }] } };
+const bkText = C.buildBackup(bkState, 1760000000000);
+ok("备份含 app/version/时间", (function () { const o = JSON.parse(bkText); return o.app === "hk-radar-pwa" && o.version === 1 && o.at === 1760000000000; })(), bkText.slice(0, 60));
+const bkBack = C.parseBackup(bkText);
+ok("恢复读回持仓/台账", bkBack && bkBack.pos.sz300607.shares === 1000 && bkBack.ledger.records.length === 1, bkBack && bkBack.code);
+ok("非法备份返回 null", C.parseBackup("{}") === null && C.parseBackup("nope") === null && C.parseBackup("{\"app\":\"other\"}") === null);
+ok("页面含本机数据卡片与按钮", html.includes('id="localBox"') && html.includes("btnBackupExport") && html.includes("btnBackupImport"));
+ok("保存失败提示逻辑存在", html.includes("saveError") && html.includes("本机保存失败"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
