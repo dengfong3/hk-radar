@@ -2052,25 +2052,79 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
      * 按当前分析生成一份「建议交易计划」（减仓档 + 加仓档 + 止损线 + 仓位上限）。
      * 只是把机械参考位整理成计划格式，用户可在编辑器里改，最终仍由用户保存。
      */
+    /** 最小报价单位：A 股 0.01；港股按 HKEX 价位段 */
+    function tickOf(code, price) {
+      const mk = marketOf(code);
+      if (mk !== "hk") return 0.01;
+      const p = Number(price) || 0;
+      if (p < 0.25) return 0.001;
+      if (p < 0.5) return 0.005;
+      if (p < 10) return 0.01;
+      if (p < 20) return 0.02;
+      if (p < 100) return 0.05;
+      if (p < 200) return 0.1;
+      if (p < 500) return 0.2;
+      if (p < 1000) return 0.5;
+      if (p < 2000) return 1;
+      if (p < 5000) return 2;
+      return 5;
+    }
+    /** 按最小报价单位取整（消除浮点尾差） */
+    function roundTick(price, tick) {
+      const t = tick > 0 ? tick : 0.01;
+      const v = Math.round(Number(price) / t) * t;
+      const dec = Math.max(0, Math.min(6, Math.round(-Math.log10(t))));
+      return Number(v.toFixed(dec));
+    }
+
     function suggestPlan(m, refs, mp, ctx3, pos, code, opt) {
       const o = opt || {};
       const lot = lotOf(code);
       const price = m && m.price > 0 ? m.price : null;
       const capital = o.capital > 0 ? o.capital : principalFor(code);
       const budget = o.budget > 0 ? o.budget : defaultBudgetFor(code);
-      const out = { takes: [], buys: [], reds: [], maxShares: null,
-        lossBudget: budget, hardStopFloor: null, vwapBand: 1.5,
-        roundTripCostPct: 1.2, levels: [], suggested: true,
-        capital, fullPos: null, riskCap: null, stopMode: null, atr: null };
+      const out = { takes: [], buys: [], reds: [], maxShares: null, lossBudget: budget,
+        hardStopFloor: null, vwapBand: 1.5, roundTripCostPct: 1.2, levels: [], suggested: true,
+        capital, fullPos: null, riskCap: null, stopMode: null, atr: null,
+        bandPct: null, tick: null, tiers: 0 };
       if (!price || !refs || !refs.ok) return out;
-      const r2 = (x) => Math.round(x * 100) / 100;
-      const zone = (p) => ({ lo: r2(p * 0.995), hi: r2(p * 1.005) });
+
+      // 1) 动态带宽：0.5×15分ATR%，夹在 0.6%–1.5%（开盘初期 ATR 为空 → 取下限 0.6%）
+      let atr = null;
+      if (o.points && o.points.length) {
+        const b15 = buildBars(o.points, 15);
+        atr = b15 && b15.length >= 6 ? atrCalc(b15, 14) : null;
+      }
+      out.atr = atr;
+      const atrPct = atr && price ? (atr / price) * 100 : null;
+      const bandPct = Math.min(1.5, Math.max(0.6, atrPct == null ? 0.6 : atrPct * 0.5));
+      out.bandPct = Math.round(bandPct * 100) / 100;
+      const band = bandPct / 100;
+
+      // 2) 最小报价单位 + 区间（价格对齐 tick，避免挂不出的价格）
+      const tick = tickOf(code, price);
+      out.tick = tick;
+      const snap = (p) => roundTick(p, tick);
+      const zone = (p) => {
+        const lo = snap(p * (1 - band));
+        let hi = snap(p * (1 + band));
+        if (hi <= lo) hi = snap(lo + tick);
+        return { lo, hi };
+      };
+
+      // 3) 相邻档位最小间距：至少 2 个带宽且不小于 0.8%（防止区间重叠）
+      const minGap = Math.max(band * 2, 0.008);
+
+      // 4) 减仓档数随持仓：≥4 手拆 3 档，2–3 手 2 档，不足 2 手 1 档
+      const shares = Math.max(0, Number((pos && pos.shares) || 0));
+      const lots = Math.floor(shares / lot);
+      const takeLimit = lots >= 4 ? 3 : lots >= 2 ? 2 : 1;
+      out.tiers = takeLimit;
+
       const dy = o.daily && o.daily.ok ? o.daily : null;
 
-      // 1) 减仓档：日内参考位 + 日线关键位（MA20/60、20/60 日高点），合并去重后取前 3
-      const intra = [];
-      for (const r of (refs.reduce || [])) intra.push({ price: r.price, why: r.why, conf: r.conf, qty: r.qty || 0 });
-      intra.sort((a, b) => a.price - b.price);
+      // 5) 减仓候选：日内最近 2 档 → 日线关键位 → 其余日内位；间距不足即跳过
+      const intra = (refs.reduce || []).slice().sort((a, b) => a.price - b.price);
       const dailyC = [];
       if (dy) {
         const addR = (p, why) => { if (p != null && p > price * 1.005 && p < price * 1.2) dailyC.push({ price: p, why, conf: "中", qty: 0, daily: true }); };
@@ -2080,55 +2134,60 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         addR(dy.high60, "60日高点");
       }
       dailyC.sort((a, b) => a.price - b.price);
-      // 组合顺序：日内最近 2 档 → 日线关键位 → 其余日内位；总数 3 档，0.25% 内去重
-      const merged = [];
-      const take = (c) => {
-        if (!c || merged.length >= 3) return;
-        if (merged.some((x) => Math.abs(x.price / c.price - 1) < 0.0025)) return;
-        merged.push(c);
-      };
-      intra.slice(0, 2).forEach(take);
-      dailyC.forEach(take);
-      intra.slice(2).forEach(take);
-      merged.sort((a, b) => a.price - b.price);
-      merged.forEach((r, i) => {
+      const priority = [];
+      intra.slice(0, 2).forEach((x) => priority.push(x));
+      dailyC.forEach((x) => priority.push(x));
+      intra.slice(2).forEach((x) => priority.push(x));
+      const kept = [];
+      for (const c of priority) {
+        if (kept.length >= takeLimit) break;
+        if (!(c.price > 0)) continue;
+        if (kept.some((k) => Math.abs(k.price / c.price - 1) < minGap)) continue;
+        kept.push(c);
+      }
+      kept.sort((a, b) => a.price - b.price);
+      kept.forEach((r, i) => {
         const z = zone(r.price);
         out.takes.push({ id: "T" + (i + 1), lo: z.lo, hi: z.hi,
-          short: i === 2 ? "清剩余" : "减 " + (i + 1) + " 档",
+          short: i === takeLimit - 1 && takeLimit > 1 ? "清剩余" : "减 " + (i + 1) + " 档",
           label: r.why + " · 建议减 " + (r.qty > 0 ? r.qty + " 股" : "观察"),
           why: r.why, conf: r.conf || "中" });
       });
 
-      // 2) 加仓档（日内参考位，±0.5%）
-      (refs.add || []).slice(0, 2).forEach((r, i) => {
+      // 6) 加仓档：最多 2 档，同样按间距合并
+      const addKept = [];
+      for (const r of (refs.add || [])) {
+        if (addKept.length >= 2) break;
+        if (!(r.price > 0)) continue;
+        if (addKept.some((k) => Math.abs(k.price / r.price - 1) < minGap)) continue;
+        addKept.push(r);
+      }
+      addKept.forEach((r, i) => {
         const z = zone(r.price);
         out.buys.push({ id: "B" + (i + 1), lo: z.lo, hi: z.hi, shares: r.qty || 0,
           label: r.why + " · 建议加 " + (r.qty > 0 ? r.qty + " 股" : "观察"),
           why: r.why, conf: r.conf || "中" });
       });
 
-      // 3) 止损：支撑×0.99 与 ATR 自适应取更低者，再夹在 0.8%–6%
-      let atr = null;
-      if (o.points && o.points.length) {
-        const b15 = buildBars(o.points, 15);
-        atr = b15 && b15.length >= 6 ? atrCalc(b15, 14) : null;
-      }
-      out.atr = atr;
+      // 7) 止损：最近支撑（已跌破今日低点的不算支撑）×0.99 与 ATR 取更低，再夹 0.8%–6%
+      const dayLow = m && m.low > 0 ? m.low : null;
       const entryRef = out.buys.length ? (out.buys[0].lo + out.buys[0].hi) / 2 : price;
       const supCand = ((mp && mp.keySup) || []).slice();
       if (dy) { [dy.low20, dy.low60, dy.ma20, dy.ma60].forEach((x) => { if (x != null) supCand.push(x); }); }
-      const sups = supCand.filter((x) => x > 0 && x < price * 0.985).sort((a, b) => b - a);
-      const supStop = sups.length ? sups[0] * 0.99 : price * 0.95;
-      let stop = Math.min(supStop, price * 0.99);
+      const sups = supCand
+        .filter((x) => x > 0 && x < price * 0.985 && (!dayLow || x < dayLow))
+        .sort((a, b) => b - a);
+      const supBase = sups.length ? sups[0] : (dayLow ? dayLow : (refs.add && refs.add.length ? refs.add[refs.add.length - 1].price : price * 0.95));
+      let stop = Math.min(supBase * 0.99, price * 0.99);
       if (atr) stop = Math.min(stop, entryRef - 1.5 * atr);
-      const distPct = Math.min(6, Math.max(0.8, (price - stop) / price * 100));
-      stop = r2(price * (1 - distPct / 100));
+      const distPct = Math.min(6, Math.max(0.8, ((price - stop) / price) * 100));
+      stop = snap(price * (1 - distPct / 100));
       out.stopMode = atr ? "ATR(15分)×1.5" : "支撑位×0.99";
       out.reds.push({ id: "R1", at: stop, dir: "below", level: "warn", short: "止损",
         label: "跌破 " + stop + "：按计划止损" });
 
-      // 4) 仓位上限：本金满仓 与 亏损预算反推 取小
-      const riskPer = Math.max(0.01, price - stop);
+      // 8) 仓位上限：本金满仓 与 亏损预算反推 取小
+      const riskPer = Math.max(tick, price - stop);
       const fullPos = Math.floor(capital / price / lot) * lot;
       const byRisk = Math.floor(budget / riskPer / lot) * lot;
       out.fullPos = Math.max(0, fullPos);
@@ -2138,6 +2197,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       out.levels = out.takes.map((t) => t.lo).concat(out.buys.map((b) => b.hi)).concat(out.reds.map((r) => r.at));
       return out;
     }
+
 
   /* 日内机械参考位：当天分钟数据推出的减仓/加仓参考价（可解释、非预测、非建议） */
   function intradayRefs(m, points, pos, opts) {
@@ -2509,6 +2569,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     poolTargetOf: poolTargetOf,
     buildBrief: buildBrief, sessionPhase: sessionPhase, briefDeadlines: briefDeadlines, segmentStats: segmentStats, prevDailyBar: prevDailyBar,
     briefKey: briefKey,
+    tickOf: tickOf, roundTick: roundTick,
     attachPoolLive: attachPoolLive,
     buildBackup: buildBackup, parseBackup: parseBackup,
     chgClass: chgClass,
@@ -2529,7 +2590,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.29 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.30 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4087,8 +4148,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var tip = $("planSuggestTip");
     if (tip) tip.textContent = "已填入建议：减仓 " + sp.takes.length + " 档 · 加仓 " + sp.buys.length +
       " 档 · 止损 " + (sp.reds[0] ? sp.reds[0].at : "—") + " · 仓位上限 " + sp.maxShares +
-      " 股（满仓 " + sp.fullPos + " / 预算允许 " + sp.riskCap + "）· 止损方式 " +
-      (sp.stopMode || "--") + "。请核对后点「保存计划」。";
+      " 股（满仓 " + sp.fullPos + " / 预算允许 " + sp.riskCap + "）· 区间带宽 ±" + (sp.bandPct == null ? "--" : sp.bandPct) +
+      "%（按 ATR 动态）· 止损方式 " + (sp.stopMode || "--") + "。请核对后点「保存计划」。";
   });
 
   $("btnPlanClear").addEventListener("click", function () {

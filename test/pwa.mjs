@@ -843,7 +843,7 @@ ok("计划：预算 100 元 → 允许仓位 0 股", spTiny.riskCap === 0 && spT
 
 // 日线关键位并入减仓档
 const dyPlan = { ok: true, ma20: 105, ma60: 108, high20: 106, high60: 112, low20: 95, low60: 90, trend: "flat" };
-const spDaily = C.suggestPlan(planM, planRefs, planMp, null, { shares: 0, cost: 0 }, "sh603083", { points: planPts, daily: dyPlan });
+const spDaily = C.suggestPlan(planM, planRefs, planMp, null, { shares: 1000, cost: 96 }, "sh603083", { points: planPts, daily: dyPlan });
 const whys = spDaily.takes.map((t) => t.why).join(",");
 ok("计划：日线关键位进入减仓档", whys.indexOf("日线") >= 0 || whys.indexOf("20日") >= 0 || whys.indexOf("60日") >= 0, whys);
 
@@ -1030,6 +1030,43 @@ ok("恢复读回持仓/台账", bkBack && bkBack.pos.sz300607.shares === 1000 &&
 ok("非法备份返回 null", C.parseBackup("{}") === null && C.parseBackup("nope") === null && C.parseBackup("{\"app\":\"other\"}") === null);
 ok("页面含本机数据卡片与按钮", html.includes('id="localBox"') && html.includes("btnBackupExport") && html.includes("btnBackupImport"));
 ok("保存失败提示逻辑存在", html.includes("saveError") && html.includes("本机保存失败"));
+
+
+/* ---------- 31) 计划档位：动态带宽 / 防重叠 / 档数 / 最小报价单位 ---------- */
+console.log("\n[计划档位带宽与防重叠]");
+const spT = C.suggestPlan(planM, planRefs, planMp, null, { shares: 1000, cost: 96 }, "sh603083", { points: planPts });
+ok("带宽在 0.6%–1.5%（随 ATR 动态）", spT.bandPct >= 0.6 && spT.bandPct <= 1.5, spT.bandPct);
+ok("减仓档区间不重叠", (function () {
+  for (let i = 1; i < spT.takes.length; i++) if (spT.takes[i].lo < spT.takes[i - 1].hi) return false;
+  return true;
+})(), spT.takes.map((t) => [t.lo, t.hi]));
+ok("加仓档区间不重叠", (function () {
+  const zs = spT.buys.slice().sort((a, b) => a.lo - b.lo);
+  for (let i = 1; i < zs.length; i++) if (zs[i].lo < zs[i - 1].hi) return false;
+  return true;
+})(), spT.buys.map((b) => [b.lo, b.hi]));
+ok("档数随持仓：100 股 → 1 档", C.suggestPlan(planM, planRefs, planMp, null, { shares: 100, cost: 100 }, "sh603083", { points: planPts }).takes.length === 1);
+ok("档数随持仓：1000 股 → 3 档", C.suggestPlan({ price: 100, high: 105, low: 95, prevClose: 99, vwap: 100, vwapDevPct: 0, volRatio: 1 }, refsForPlan, { keySup: [95, 90] }, { days: 3 }, { shares: 1000, cost: 96 }, "sh603083").takes.length === 3);
+ok("A 股价格对齐 0.01", spT.takes.every((t) => Math.abs(t.lo * 100 - Math.round(t.lo * 100)) < 1e-9 && Math.abs(t.hi * 100 - Math.round(t.hi * 100)) < 1e-9), spT.takes.map((t) => [t.lo, t.hi]));
+ok("levels 数量 = 减仓 + 加仓 + 止损", spT.levels.length === spT.takes.length + spT.buys.length + spT.reds.length, spT.levels.length);
+ok("止损不高于今日低点（已跌破的不算支撑）", (function () {
+  const p2 = C.suggestPlan({ price: 100, high: 103, low: 96, prevClose: 99, vwap: 100, vwapDevPct: 0, volRatio: 1 },
+    { ok: true, reduce: [{ price: 104, why: "A", qty: 200 }], add: [{ price: 97, why: "B", qty: 200 }] },
+    { keySup: [97, 94] }, {}, { shares: 1000, cost: 96 }, "sh603083", { points: planPts });
+  return p2.reds[0].at < 96;
+})(), "止损<今日低点");
+
+// 港股：06166 价位段 0.05，区间对齐
+const hkRefs = { ok: true, reduce: [{ price: 86.0, why: "整数关口", qty: 50 }], add: [{ price: 85.0, why: "整数关口", qty: 50 }] };
+const hkPlan = C.suggestPlan({ price: 85.4, high: 85.45, low: 81.55, prevClose: 78.85 }, hkRefs, { keySup: [78.85] }, null, { shares: 200, cost: 96.7 }, "hk06166", {});
+ok("港股 tick = 0.05", hkPlan.tick === 0.05, hkPlan.tick);
+ok("港股计划价对齐 0.05", (function () {
+  const vals = [];
+  hkPlan.takes.forEach((t) => { vals.push(t.lo, t.hi); });
+  hkPlan.buys.forEach((b) => { vals.push(b.lo, b.hi); });
+  hkPlan.reds.forEach((r) => vals.push(r.at));
+  return vals.every((v) => Math.abs(v / 0.05 - Math.round(v / 0.05)) < 1e-9);
+})(), hkPlan.takes.map((t) => [t.lo, t.hi]));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
