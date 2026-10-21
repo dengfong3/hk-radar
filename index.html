@@ -525,6 +525,18 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (high == null || p.price > high) { high = p.price; hiAt = p.hhmm; }
       if (low == null || p.price < low) { low = p.price; loAt = p.hhmm; }
     }
+    // 均价合理性兜底：数据源单位错配（如成交量按股而非手）会让 cumAmt/cumVol 偏离 100 倍，
+    // 这里用「价格×成交量」加权均价校验并替换，保证 vwapDevPct 不会出现 +10000% 这种离谱值
+    if (vwap != null && vwap > 0 && high != null && low != null && high > 0 &&
+      (vwap < low * 0.9 || vwap > high * 1.1)) {
+      var pv = 0, vv = 0;
+      for (i = 0; i < points.length; i++) {
+        var q = points[i];
+        var v = q.volInc || 0;
+        if (q.price > 0 && v > 0) { pv += q.price * v; vv += v; }
+      }
+      vwap = vv > 0 ? pv / vv : (last ? last.price : null);
+    }
     var volRatio = null;
     var t = now || new Date();
     var hhmm = String(t.getHours()).padStart(2, "0") + String(t.getMinutes()).padStart(2, "0");
@@ -538,9 +550,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       var base = Math.max(0, series[n - 2].cumVol - series[n - 7].cumVol) / 5;
       if (base > 0) volRatio = lastVol / base;
     }
+    var vwapDevPct = (price != null && vwap) ? (price - vwap) / vwap * 100 : null;
+    if (vwapDevPct != null && (!isFinite(vwapDevPct) || Math.abs(vwapDevPct) > 50)) vwapDevPct = null;
     return {
       price: price, prevClose: prevClose, vwap: vwap,
-      vwapDevPct: (price != null && vwap) ? (price - vwap) / vwap * 100 : null,
+      vwapDevPct: vwapDevPct,
       change: quote.change,
       changePct: quote.changePct != null ? quote.changePct : (price != null && prevClose ? (price - prevClose) / prevClose * 100 : null),
       high: high, low: low, hiAt: hiAt, loAt: loAt, open: quote.open,
@@ -902,7 +916,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var d = json && json.data;
     if (!d || !d.trends || !d.trends.length) return { ok: false, error: "备用源无分时数据" };
     var volMul = marketOf(code) === "cn" ? 100 : 1;
-    var points = [], cumVol = 0, cumAmt = 0, hi = null, lo = null, i, day = "";
+    var points = [], cumVol = 0, cumAmt = 0, cumPxVol = 0, hi = null, lo = null, i, day = "";
     for (i = 0; i < d.trends.length; i++) {
       var p = String(d.trends[i]).split(",");
       var ts = String(p[0] || "").trim().split(/\s+/);
@@ -910,14 +924,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       var price = num(p[2]);
       if (!/^\d{4}$/.test(hhmm) || price === null) continue;
       var dstr = String(ts[0] || "").replace(/-/g, "");
-      if (dstr && dstr !== day) { day = dstr; cumVol = 0; cumAmt = 0; hi = null; lo = null; }
+      if (dstr && dstr !== day) { day = dstr; cumVol = 0; cumAmt = 0; cumPxVol = 0; hi = null; lo = null; }
       var vol = (num(p[5]) || 0) * volMul, amt = num(p[6]) || 0;
-      cumVol += vol; cumAmt += amt;
+      cumVol += vol; cumAmt += amt; cumPxVol += price * vol;
       var h = num(p[3]), l = num(p[4]);
       if (h !== null && (hi === null || h > hi)) hi = h;
       if (l !== null && (lo === null || l < lo)) lo = l;
       points.push({ hhmm: hhmm, date: day, slot: slotOf(hhmm, code), price: price, cumVol: cumVol, cumAmt: cumAmt, volInc: vol,
-        vwap: cumVol > 0 && cumAmt > 0 ? cumAmt / cumVol : null });
+        vwap: cumVol > 0 ? cumPxVol / cumVol : null });
     }
     if (!points.length) return { ok: false, error: "备用源分时为空" };
     var last = points[points.length - 1], pc = num(d.preClose);
@@ -1195,7 +1209,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         else R.push("多周期有分歧 " + (mp.score > 0 ? "+" : "") + mp.score + "/4");
       }
       // 位置
-      if (m.vwapDevPct != null) {
+      if (m.vwapDevPct != null && Math.abs(m.vwapDevPct) <= 50) {
         if (m.vwapDevPct >= 2) { bear += 1.5; R.push("高于均价 " + m.vwapDevPct.toFixed(1) + "%（追高风险）"); }
         else if (m.vwapDevPct <= -2) { bull += 1.5; R.push("低于均价 " + Math.abs(m.vwapDevPct).toFixed(1) + "%"); }
       }
@@ -1205,7 +1219,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       }
       // 一票否决
       if (regime === "chop") V.push("震荡区（多周期方向不一致）：不交易");
-      if (m.vwapDevPct != null && m.vwapDevPct >= 3) V.push("距均价 +" + m.vwapDevPct.toFixed(1) + "%：追高，不做多");
+      if (m.vwapDevPct != null && Math.abs(m.vwapDevPct) <= 50 && m.vwapDevPct >= 3) V.push("距均价 +" + m.vwapDevPct.toFixed(1) + "%：追高，不做多");
       if (!mp || mp.valid < 3) V.push("周期数据不足（开盘初期）：不交易");
       // 日线大周期过滤（逆势降权 / 顺势加权）
       if (opt && opt.daily && opt.daily.ok) {
@@ -2135,7 +2149,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         else suitable = "no";
         out.reasons.push.apply(out.reasons, (stp.reasons || []).slice(0, 3));
       }
-      if (m.vwapDevPct != null && m.vwapDevPct >= 3) { suitable = "no"; vetoes.unshift("距均价 +" + m.vwapDevPct.toFixed(1) + "%，追高"); }
+      if (m.vwapDevPct != null && Math.abs(m.vwapDevPct) <= 50 && m.vwapDevPct >= 3) { suitable = "no"; vetoes.unshift("距均价 +" + m.vwapDevPct.toFixed(1) + "%，追高"); }
       if (dy && dy.trend === "down") { vetoes.push("日线空头排列，逆势不建仓"); if (suitable === "yes") suitable = "small"; }
       out.vetoes = vetoes.filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
       out.suitable = suitable;
@@ -2858,7 +2872,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.35 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.36 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 

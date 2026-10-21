@@ -1224,5 +1224,34 @@ ok("CSV 行数 = 表头 + 记录数", csvLines.length === 4, csvLines.length);
 ok("CSV 含结论与触发标记", csvLines[1].indexOf("可以建仓") > 0 && csvLines[1].split(",")[9] === "1", csvLines[1]);
 ok("页面含导出按钮", html.includes("btnTrackExport") && html.includes("导出 CSV"));
 
+
+/* ---------- 37) 均价单位错配回归（+10052.8% 事故） ---------- */
+console.log("\n[均价单位错配回归]");
+// 构造东财 trends2：成交额单位错误（本应 4,000,000 元，只给了 40）
+const emBad = { data: { name: "测试股", code: "600036", preClose: 40.0, trends: [
+  "2026-10-21 09:30,40.00,40.00,40.00,40.00,1000,40.00,40.00",
+  "2026-10-21 09:31,40.00,40.10,40.10,40.00,1200,48.00,40.05",
+  "2026-10-21 09:32,40.10,40.20,40.20,40.10,900,36.00,40.10"] } };
+const emParsed = C.parseEastmoney(emBad, "sh600036");
+ok("备用源解析成功", emParsed.ok === true, emParsed && emParsed.error);
+const emM = C.computeMetrics(emParsed, null, "sh600036");
+ok("均价单位错配 → 加权均价仍≈价格", Math.abs(emM.vwap - 40.1) < 0.5, emM.vwap);
+ok("距均价不再出现 +10000%", emM.vwapDevPct == null || Math.abs(emM.vwapDevPct) < 10, emM.vwapDevPct);
+ok("成交额单位错配时 turnover 不影响均价", typeof emM.vwap === "number" && emM.vwap > 30, emM.vwap);
+
+// computeMetrics 兜底：last.vwap 明显偏离区间
+const badPts = [{ hhmm: "0930", date: "20261021", slot: 0, price: 40.0, cumVol: 100, cumAmt: 4000, volInc: 100, vwap: 0.39 },
+  { hhmm: "0931", date: "20261021", slot: 1, price: 40.2, cumVol: 200, cumAmt: 8000, volInc: 100, vwap: 0.39 }];
+const badM = C.computeMetrics({ points: badPts, quote: { price: 40.2, prevClose: 40.0, high: 40.3, low: 39.9, changePct: 0.5 } }, null, "sh600036");
+ok("异常 vwap 被加权均价替换", Math.abs(badM.vwap - 40.1) < 0.5, badM.vwap);
+ok("异常 vwapDevPct 被清零/合理", badM.vwapDevPct == null || Math.abs(badM.vwapDevPct) < 10, badM.vwapDevPct);
+
+// 建仓建议：不再因坏均价误报“追高”
+const badRefs = { ok: true, reduce: [{ price: 41, why: "整数关口", qty: 0 }], add: [{ price: 39.6, why: "支撑", qty: 0 }] };
+const badAdvice = C.entryAdvice({ price: 40.2, high: 40.3, low: 39.9, prevClose: 40.0, vwap: 0.39, vwapDevPct: 10052.8, volRatio: 1 }, badPts,
+  null, null, badRefs, { ok: true, grade: "C", side: "long", vetoes: [], reasons: [] }, null, null, { shares: 0, cost: 0 }, "sh600036", { capital: 30000 });
+const vTxt = (badAdvice.vetoes || []).join("|");
+ok("建仓建议不再出现 10052.8% 的追高误报", vTxt.indexOf("10052") < 0 && vTxt.indexOf("10052.8") < 0, vTxt.slice(0, 120));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
