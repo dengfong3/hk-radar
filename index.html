@@ -2875,7 +2875,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.37 · 2026-10-21";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.38 · 2026-10-22";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3202,6 +3202,29 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     } else {
       html += '<div class="sigwhy">保存位置：本机浏览器（localStorage）· ' +
         (when ? "最后保存 " + C.fmtLocalTime(when) : "尚未保存") + "</div>";
+    }
+    // 入口 + 数据自检：换入口/换浏览器时一眼看出"为什么没数据"
+    var entry = "未知入口";
+    try {
+      if (typeof location !== "undefined" && location && location.protocol) {
+        entry = location.protocol === "file:" ? "file://（本地文件）" : (location.origin || location.href);
+      }
+    } catch (e) {}
+    html += '<div class="sigwhy">当前入口：' + entry + "</div>";
+    var nPos = 0;
+    Object.keys(st.pos || {}).forEach(function (k) { if (st.pos[k] && st.pos[k].shares > 0) nPos++; });
+    var nPlan = Object.keys(st.plans || {}).length;
+    var nWatch = (st.watch || []).length;
+    var nLedger = ((st.ledger || {}).records || []).length;
+    var nPool = (st.pools || []).length;
+    var nBrief = Object.keys(st.briefs || {}).length;
+    var total = nPos + nPlan + nLedger + nPool + nBrief + (st.entryTrack || []).length;
+    html += '<div class="sigwhy">数据：持仓 ' + nPos + " · 计划 " + nPlan + " · 自选 " + nWatch +
+      " · 台账 " + nLedger + " · 观察池 " + nPool + " · 简报 " + nBrief + "</div>";
+    if (total === 0 && !when) {
+      html += '<div class="sigveto">⚠ 本机没有历史数据：你可能换了浏览器、或换了打开入口。' +
+        "「线上链接（https://…github.io）」和「本地文件（file://）」的数据是两套、互不相通；" +
+        "从原来用的入口打开，或点下面「导入备份」恢复。</div>";
     }
     html += '<div class="sigwhy">换设备/清缓存/无痕模式会丢数据，建议定期导出备份；导入后自动恢复并刷新。</div>';
     html += '<div class="tradebar"><button id="btnBackupExport">导出备份</button>' +
@@ -4722,6 +4745,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   $("codeInput").value = C.displayCode(st.code);
   renderChips(); renderPlanSummary(); bindPosInputs();
   try { fetchWatchNames(); } catch (e) {}
+  try { renderLocalCard(); } catch (e) {}
+  try { renderEntryCard(); } catch (e) {}
+  try { renderEntryTrackCard(); } catch (e) {}
   tick(false);
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(function () { /* 线上需要 https 才注册 */ });

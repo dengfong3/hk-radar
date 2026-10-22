@@ -1270,5 +1270,21 @@ ok("自选 chip 显示名称（剑桥科技）", chipsTxt.indexOf("剑桥科技"
 ok("自选 chip 显示名称（腾讯控股）", chipsTxt.indexOf("腾讯控股") >= 0, chipsTxt.slice(0, 160));
 ok("自选 chip 仍显示代码", chipsTxt.indexOf("603083") >= 0, chipsTxt.slice(0, 120));
 
+
+/* ---------- 39) 本机数据入口自检 ---------- */
+console.log("\n[本机数据入口自检]");
+ok("页面显示入口与数据摘要", html.includes("当前入口") && html.includes("数据：持仓"));
+ok("空数据时给出换入口警告", html.includes("本机没有历史数据") && html.includes("两套、互不相通"));
+const hEt = makeHarness({ code: "sh603083", watch: ["sh603083"], sound: false, chartMode: "min",
+  pos: {}, plans: {}, trade: {}, lastFired: {}, ledger: { records: [] }, pools: [], briefs: {}, entryTrack: [] },
+  (code) => (code === "sh603083" ? aSharePayload() : null));
+let threwEt = null;
+try { hEt.run(coreSrc); hEt.run(uiSrc); } catch (e) { threwEt = e; }
+ok("入口自检场景无异常", !threwEt, threwEt && threwEt.message);
+await new Promise((r) => setTimeout(r, 250));
+const etTxt = hEt.deep("localBox");
+ok("空数据时本机卡出现警告", etTxt.indexOf("本机没有历史数据") >= 0, etTxt.slice(0, 200));
+ok("本机卡显示入口信息", etTxt.indexOf("当前入口") >= 0, etTxt.slice(0, 160));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
