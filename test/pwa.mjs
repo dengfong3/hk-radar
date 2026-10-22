@@ -1286,5 +1286,14 @@ const etTxt = hEt.deep("localBox");
 ok("空数据时本机卡出现警告", etTxt.indexOf("本机没有历史数据") >= 0, etTxt.slice(0, 200));
 ok("本机卡显示入口信息", etTxt.indexOf("当前入口") >= 0, etTxt.slice(0, 160));
 
+
+/* ---------- 40) 观察池：收盘后自动补生成 ---------- */
+console.log("\n[观察池收盘后补生成]");
+const pwOpen = C.poolWindow(new Date(2026, 9, 22, 15, 10));
+ok("15:10 已过窗口但 afterClose=true", pwOpen.inWindow === false && pwOpen.afterClose === true, pwOpen);
+const pwIn = C.poolWindow(new Date(2026, 9, 22, 14, 55));
+ok("14:55 在窗口内", pwIn.inWindow === true && pwIn.afterClose === false, pwIn);
+ok("页面支持收盘后补生成（afterClose）", html.includes("afterClose") && html.includes("补生成一次"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
