@@ -2992,7 +2992,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.41 · 2026-10-26";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.42 · 2026-10-26";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3031,7 +3031,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   st.eventRisk = st.eventRisk || false;
   if (st.watch.indexOf(st.code) < 0) st.watch.unshift(st.code);
 
-  var parsed = null, metrics = null, lastActive = {}, timer = 0, inflight = false, lastOk = 0;
+  var parsed = null, metrics = null, metricsCode = "", lastActive = {}, timer = 0, inflight = false, lastOk = 0;
   var alertQueue = [], muteUntil = 0, destroyed = false;
   var curPos = function () { return st.pos[st.code] || { shares: 0, cost: 0, realized: 0 }; };
   var curTrade = function () { return st.trade[st.code] || { count: 0, cost: 0 }; };
@@ -3426,7 +3426,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   function renderBurstCard() {
     var box = $("burstBox"), meta = $("burstMeta");
     if (!box) return;
-    if (!metrics) { box.innerHTML = '<div class="sigwhy">等待行情…</div>'; return; }
+    if (!metrics) { box.innerHTML = '<div class="sigwhy">等待行情…</div>'; if (meta) meta.textContent = "扫描中"; return; }
+    if (metricsCode !== st.code) {
+      box.innerHTML = '<div class="sigwhy">正在切换股票，等待新行情…</div>';
+      if (meta) meta.textContent = "切换中";
+      return;
+    }
     var points = allPointsNow();
     var pos = curPos();
     var refs = C.intradayRefs(metrics, points, pos, { code: st.code, plan: curPlan() });
@@ -3457,9 +3462,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     }
     (b.warn || []).forEach(function (w) { html += '<div class="sigveto">⚠ ' + w + "</div>"; });
     // 今日触发记录
-    var logs = (st.burstLog || []).filter(function (x) { return x.date === today; }).slice(-5).reverse();
+    var logs = (st.burstLog || []).filter(function (x) { return x.date === today && x.code === st.code; }).slice(-5).reverse();
     if (logs.length) {
-      html += '<div class="sigwhy" style="margin-top:2px"><b>今日触发</b></div>';
+      html += '<div class="sigwhy" style="margin-top:2px"><b>今日触发（本股）</b></div>';
       logs.forEach(function (x) {
         var stTxt = "跟踪中";
         if (metrics && x.target != null && metrics.price >= x.target) stTxt = "✅ 已达目标";
@@ -4600,7 +4605,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     fetchQuote(requested)
       .then(function (p) {
         if (requested !== st.code) return;
-        parsed = p; metrics = C.computeMetrics(p, null, requested); lastOk = Date.now();
+        parsed = p; metrics = C.computeMetrics(p, null, requested); metricsCode = requested; lastOk = Date.now();
         lastSource = p.source === "eastmoney" ? "东财" : (p.source === "tencent-snapshot" ? "快照" : "腾讯");
         failStreak = 0;
         C.bumpSrcHealth(st.srcStats, p.source === "eastmoney" ? "eastmoney" : (p.source === "tencent-snapshot" ? "snapshot" : "tencent"), Date.now());
@@ -4714,7 +4719,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (st.watch.indexOf(code) < 0) st.watch.unshift(code);
     if (st.watch.length > 8) st.watch = st.watch.slice(0, 8);
     save({ code: st.code, watch: st.watch });
-    parsed = null; metrics = null; lastActive = {}; alertQueue = []; renderAlert();
+    parsed = null; metrics = null; metricsCode = ""; lastActive = {}; alertQueue = []; renderAlert();
+    try { renderBurstCard(); } catch (e) {}
     $("codeInput").value = C.displayCode(code);
     renderChips(); renderPlanSummary(); bindPosInputs();
     try { fetchWatchNames(); } catch (e) {} renderLocalCard();

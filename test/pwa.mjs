@@ -1337,5 +1337,26 @@ const bsD = C.intradayBurst(bD.m, bD.points, null, refsB, bDailyB, null, "sh6004
 ok("放量跌破均价 → 持仓减仓警告", bsD.warn.some((w) => w.indexOf("减仓警告") >= 0), bsD.warn);
 ok("页面含盘中异动卡片", html.includes('id="burstBox"') && html.includes("盘中异动"));
 
+
+/* ---------- 43) 盘中异动按股票过滤（切换股票后不应显示上一只的触发） ---------- */
+console.log("\n[盘中异动按股票过滤]");
+ok("渲染带 metricsCode 守卫", html.includes("metricsCode !== st.code"));
+ok("触发记录按 code 过滤", html.includes("x.code === st.code"));
+const hBurst = makeHarness({
+  code: "sz300308", watch: ["sz300308"], sound: false, chartMode: "min",
+  pos: {}, plans: {}, trade: {}, lastFired: {}, ledger: { records: [] }, pools: [], briefs: {}, entryTrack: [],
+  burstLog: [
+    { ts: Date.now(), date: C.todayStr(), code: "sh600418", name: "江淮汽车", hhmm: "1318", kind: "放量收回均价", entry: 20.47, stop: 20.34, target: 20.71, rr: 1.89 },
+    { ts: Date.now(), date: C.todayStr(), code: "sz300308", name: "中际旭创", hhmm: "1320", kind: "放量突破前高", entry: 180, stop: 178, target: 186, rr: 2.0 }
+  ]
+}, (code) => aSharePayload());
+let threwBurst = null;
+try { hBurst.run(coreSrc); hBurst.run(uiSrc); } catch (e) { threwBurst = e; }
+ok("切换股票场景无异常", !threwBurst, threwBurst && threwBurst.message);
+await new Promise((r) => setTimeout(r, 300));
+const burstTxt = hBurst.deep("burstBox");
+ok("不显示其他股票的触发记录", burstTxt.indexOf("江淮") < 0, burstTxt.slice(0, 200));
+ok("显示本股触发记录", burstTxt.indexOf("中际旭创") >= 0, burstTxt.slice(0, 220));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
