@@ -1305,5 +1305,37 @@ ok("回踩档 RR 字段存在", eaRR.rrZone != null, eaRR.rrZone);
 ok("回踩档 RR 优于现价 RR", eaRR.rrZone >= eaRR.rr, [eaRR.rr, eaRR.rrZone]);
 ok("页面区分现价RR/回踩档RR", html.includes("现价RR") && html.includes("回踩档RR") && html.includes("仓位上限"));
 
+
+/* ---------- 42) 盘中敏捷信号 ---------- */
+console.log("\n[盘中敏捷信号]");
+function burstMake(spikeVol, lastPrice, extra) {
+  const pts = [];
+  for (let i = 0; i < 20; i++) pts.push({ hhmm: "095" + (i % 10), slot: i, price: 19.5, volInc: 100000, cumVol: 100000 * (i + 1), vwap: 19.5 });
+  const path = [19.75, 20.0, lastPrice];
+  for (let i = 0; i < 3; i++) pts.push({ hhmm: "100" + i, slot: 20 + i, price: path[i], volInc: spikeVol, cumVol: 2000000 + spikeVol * (i + 1), vwap: 19.65 });
+  const last = pts[pts.length - 1].price;
+  return { points: pts, m: { price: last, open: 19.5, high: Math.max(19.5, last), low: 19.4, prevClose: 19.5, changePct: (last / 19.5 - 1) * 100, vwap: 19.65, vwapDevPct: (last - 19.65) / 19.65 * 100 } };
+}
+const refsB = { ok: true, reduce: [{ price: 20.8, why: "整数关口", qty: 0 }, { price: 21.2, why: "前高", qty: 0 }], add: [{ price: 19.5, why: "VWAP", qty: 0 }] };
+const bDailyB = { ok: true, trend: "up", ma20: 19.0, ma60: 18.0, high20: 21.0 };
+const bA = burstMake(400000, 20.2);
+const bsA = C.intradayBurst(bA.m, bA.points, null, refsB, bDailyB, null, "sh600418", {});
+ok("放量突破 → 试探买点", bsA.ok && bsA.side === "long", [bsA.side, bsA.kind, bsA.warn]);
+ok("买点给出入场/止损/目标/RR≥1.3", bsA.entry > 0 && bsA.stop < bsA.entry && bsA.target > bsA.entry && bsA.rr >= 1.3, [bsA.entry, bsA.stop, bsA.target, bsA.rr]);
+ok("买点带量能与仓位提示", bsA.volX != null && bsA.sizeHint.indexOf("1/3") >= 0, [bsA.volX, bsA.sizeHint]);
+const bB = burstMake(100000, 20.2);
+const bsB = C.intradayBurst(bB.m, bB.points, null, refsB, bDailyB, null, "sh600418", {});
+ok("量能不足 → 不触发", bsB.side === "none", [bsB.side, bsB.volX]);
+const bC = burstMake(400000, 21.5);
+const bsC = C.intradayBurst(bC.m, bC.points, null, refsB, bDailyB, null, "sh600418", {});
+ok("过度追高 → 不触发且有警告", bsC.side === "none" && bsC.warn.some((w) => w.indexOf("追高") >= 0), [bsC.side, bsC.warn]);
+const bD = burstMake(400000, 19.6);
+bD.m.price = 19.2; bD.m.changePct = -1.5; bD.m.vwap = 19.6; bD.m.vwapDevPct = -2;
+bD.points[bD.points.length - 1].price = 19.2;
+bD.points[bD.points.length - 2].price = 19.4;
+const bsD = C.intradayBurst(bD.m, bD.points, null, refsB, bDailyB, null, "sh600418", {});
+ok("放量跌破均价 → 持仓减仓警告", bsD.warn.some((w) => w.indexOf("减仓警告") >= 0), bsD.warn);
+ok("页面含盘中异动卡片", html.includes('id="burstBox"') && html.includes("盘中异动"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

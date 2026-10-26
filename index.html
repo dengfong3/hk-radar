@@ -263,6 +263,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 </div>
 
 <div class="card">
+  <div class="card-title"><b>盘中异动（敏捷信号）</b><span class="sp"></span><span id="burstMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="burstBox"></div>
+</div>
+
+<div class="card">
   <div class="card-title"><b>建仓建议（空仓时）</b><span class="sp"></span><span id="entryMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="entryBox"></div>
 </div>
@@ -2110,6 +2115,109 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
      * 空仓建仓建议：是否适合建仓、在哪建、建多少、止损/目标、先等什么条件。
      * 只在持仓为 0 时给出；有持仓时返回 hasPosition。
      */
+
+    /**
+     * 盘中敏捷信号（比"智能信号"更早、更短）：放量收回均价/放量突破前高 → 试探买点；
+     * 放量跌破均价/破日内低/冲高回落 → 持仓减仓警告。
+     * 与正式建仓的区别：这是"盘中试探仓"，RR 门槛 1.3（正式建仓仍要 2），仓位 ≤ 常规 1/3，止损必须快。
+     */
+    function intradayBurst(m, points, mp, refs, daily, order, code, opt) {
+      const o = opt || {};
+      const out = { ok: false, side: "none", kind: "", entry: null, stop: null, target: null, rr: null,
+        volX: null, reasons: [], warn: [], at: "", sessionMin: 0, sizeHint: "" };
+      if (!m || !(m.price > 0)) return out;
+      const pts = (points || []).filter((p) => p && p.price > 0);
+      if (pts.length < 12) return out;
+      const price = m.price;
+      const vwap = m.vwap;
+      const open = m.open > 0 ? m.open : pts[0].price;
+      const high = m.high > 0 ? m.high : null;
+      const low = m.low > 0 ? m.low : null;
+      const n = pts.length;
+      out.ok = true;
+      out.sessionMin = n;
+      out.at = pts[n - 1].hhmm || "";
+      const vol = (p) => p.volInc || 0;
+      const recentN = 3;
+      const recent = pts.slice(-recentN).reduce((a, p) => a + vol(p), 0) / recentN;
+      const baseSlice = pts.slice(Math.max(0, n - 18), n - recentN);
+      const base = baseSlice.length ? baseSlice.reduce((a, p) => a + vol(p), 0) / baseSlice.length : 0;
+      const volX = base > 0 ? recent / base : null;
+      out.volX = volX;
+      const bars5 = buildBars(pts, 5);
+      const atr5 = bars5 && bars5.length >= 8 ? atrCalc(bars5, Math.min(14, bars5.length - 1)) : null;
+      const chg = m.changePct;
+      const dev = m.vwapDevPct;
+      const dayHighNear = high != null && price >= high * 0.997;
+      const belowVwap = vwap != null && price <= vwap * 0.998;
+      const crossedUp = vwap != null && (function () {
+        for (let i = 1; i < n; i++) {
+          if (pts[i - 1].price < vwap * 0.998 && pts[i].price > vwap * 1.003) return true;
+        }
+        return false;
+      })();
+      const strongOrder = order && order.ok && order.buySellRatio != null ? order.buySellRatio >= 1.05 : null;
+      const bigVol = volX != null && volX >= 2.0;
+      const early = n < 15;
+      const tick = tickOf(code, price);
+
+      const cands = [];
+      if (!early && crossedUp && bigVol && chg != null && chg > -1 && dev != null && dev <= 4 && price > open) {
+        cands.push({ kind: "放量收回均价", level: vwap, strength: 2 });
+      }
+      if (!early && dayHighNear && volX != null && volX >= 2.2 && chg != null && chg >= 1.5 && dev != null && dev <= 4.5) {
+        cands.push({ kind: "放量突破前高", level: high, strength: 3 });
+      }
+      if (!early && vwap != null && price >= vwap * 1.002 && volX != null && volX >= 1.6) {
+        let touched = false;
+        for (let i = Math.max(0, n - 12); i < n; i++) {
+          if (Math.abs(pts[i].price - vwap) / vwap <= 0.004) touched = true;
+        }
+        if (touched) cands.push({ kind: "回踩均价放量反弹", level: vwap, strength: 2 });
+      }
+      const pick = cands.sort((a, b) => b.strength - a.strength)[0];
+
+      const resList = [];
+      if (refs && refs.reduce) refs.reduce.forEach((r) => { if (r && r.price > price * 1.004) resList.push(r.price); });
+      if (high != null && high > price * 1.004) resList.push(high);
+      if (daily && daily.ok) [daily.ma20, daily.ma60, daily.high20].forEach((x) => { if (x != null && x > price * 1.004) resList.push(x); });
+      resList.sort((a, b) => a - b);
+      const target = resList.length ? resList[0] : price * 1.02;
+
+      if (pick) {
+        let stop;
+        if (pick.kind === "放量突破前高") {
+          stop = Math.max(low != null ? low : price * 0.985, price - 1.0 * (atr5 || price * 0.008));
+        } else {
+          stop = Math.max(price - 1.2 * (atr5 || price * 0.008), vwap != null ? vwap * 0.994 : price * 0.985);
+        }
+        if (stop >= price) stop = price * 0.99;
+        const risk = price - stop;
+        const rr = risk > 0 ? (target - price) / risk : null;
+        if (rr != null && rr >= 1.3 && risk / price <= 0.025) {
+          out.side = "long";
+          out.kind = pick.kind;
+          out.entry = roundTick(price, tick);
+          out.stop = roundTick(stop, tick);
+          out.target = roundTick(target, tick);
+          out.rr = rr;
+          out.reasons.push(pick.kind + " · 量能 " + (volX == null ? "--" : volX.toFixed(1) + "×"));
+          if (strongOrder) out.reasons.push("外盘/内盘 " + order.buySellRatio.toFixed(2) + "（主动买强）");
+          out.sizeHint = "试探仓（≤常规仓位 1/3）· T+1：今天买明天才能卖";
+        } else {
+          out.warn.push("出现" + pick.kind + "，但盈亏比仅 " + (rr == null ? "--" : rr.toFixed(2)) +
+            "（目标 " + target.toFixed(2) + " / 止损 " + stop.toFixed(2) + "），不做");
+        }
+      }
+      if (!pick && bigVol && dayHighNear && dev != null && dev > 4.5) out.warn.push("放量但距均价 +" + dev.toFixed(1) + "%，追高风险不追");
+      if (volX != null && volX < 0.7 && chg != null && chg > 1.5) out.warn.push("价涨量缩（量能 " + volX.toFixed(2) + "×），别追");
+      if (belowVwap && bigVol && chg != null && chg < 0.5) out.warn.push("放量跌破均价（" + vwap.toFixed(2) + "）→ 持仓减仓警告");
+      if (low != null && price <= low * 1.003 && bigVol && chg != null && chg < 0) out.warn.push("放量破日内低 " + low.toFixed(2) + " → 减仓警告");
+      if (high != null && price <= high * 0.985 && chg != null && chg > 0 && volX != null && volX >= 1.5) out.warn.push("冲高回落（距高点 " + ((price / high - 1) * 100).toFixed(1) + "%）→ 持仓注意");
+      out.warn = out.warn.filter((v, i, a) => a.indexOf(v) === i).slice(0, 3);
+      return out;
+    }
+
     function entryAdvice(m, points, mp, ctx3, refs, setup, daily, order, pos, code, opt) {
       const o = opt || {};
       const lot = lotOf(code);
@@ -2862,6 +2970,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     tickOf: tickOf, roundTick: roundTick,
     attachPoolLive: attachPoolLive,
     entryAdvice: entryAdvice,
+    intradayBurst: intradayBurst,
     entryTrackAdd: entryTrackAdd, entryTrackEval: entryTrackEval, entryTrackStats: entryTrackStats, entryTrackPending: entryTrackPending,
     entryTrackGroups: entryTrackGroups, entryTrackCsv: entryTrackCsv,
     buildBackup: buildBackup, parseBackup: parseBackup,
@@ -2883,7 +2992,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.40 · 2026-10-26";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.41 · 2026-10-26";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -2917,6 +3026,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   st.capital = st.capital || {};
   st.briefs = st.briefs || {};
   st.entryTrack = st.entryTrack || [];
+  st.burstLog = st.burstLog || [];
   st.names = st.names || {};
   st.eventRisk = st.eventRisk || false;
   if (st.watch.indexOf(st.code) < 0) st.watch.unshift(st.code);
@@ -3310,6 +3420,57 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       renderBriefCard();
     });
     if (meta) meta.textContent = ph.ok ? ({ preopen: "盘前", session: "盘中", midday: "午间", postclose: "盘后" })[ph.phase] : "";
+  }
+
+  var burstLastKey = "", burstLastAt = 0;
+  function renderBurstCard() {
+    var box = $("burstBox"), meta = $("burstMeta");
+    if (!box) return;
+    if (!metrics) { box.innerHTML = '<div class="sigwhy">等待行情…</div>'; return; }
+    var points = allPointsNow();
+    var pos = curPos();
+    var refs = C.intradayRefs(metrics, points, pos, { code: st.code, plan: curPlan() });
+    var b = C.intradayBurst(metrics, points, mpData, refs, dailyData, orderData, st.code, {});
+    var html = "";
+    var today = C.todayStr();
+    if (b.ok && b.side === "long") {
+      html += '<div class="sighead"><span class="siggrade A">试探买点</span><span class="sigscore">' +
+        b.kind + " · 量能 " + (b.volX == null ? "--" : b.volX.toFixed(1) + "×") + " · " + b.at + "</span></div>";
+      html += '<div class="sigline"><span>入场 <b>' + b.entry + '</b></span><span>止损 <b>' + b.stop +
+        '</b></span><span>目标 <b>' + b.target + '</b></span><span>RR <b>' + (b.rr == null ? "--" : b.rr.toFixed(2)) +
+        '</b></span></div>';
+      if (b.reasons.length) html += '<div class="sigwhy">' + b.reasons.join(" · ") + "</div>";
+      html += '<div class="sigveto" style="color:#fde68a">' + (b.sizeHint || "") + "</div>";
+      // 新触发 → 记日志 + 通知（同一代码+类型 30 分钟内只提醒一次）
+      var key = today + ":" + st.code + ":" + b.kind + ":" + b.at;
+      if (key !== burstLastKey && Date.now() - burstLastAt > 1800000) {
+        burstLastKey = key; burstLastAt = Date.now();
+        st.burstLog = (st.burstLog || []).filter(function (x) { return x.ts > Date.now() - 86400000; });
+        st.burstLog.push({ ts: Date.now(), date: today, code: st.code, name: (parsed && parsed.quote && parsed.quote.name) || "",
+          hhmm: b.at, kind: b.kind, entry: b.entry, stop: b.stop, target: b.target, rr: b.rr });
+        if (st.burstLog.length > 30) st.burstLog = st.burstLog.slice(-30);
+        save({ burstLog: st.burstLog });
+        try { if (typeof notify === "function") notify({ id: "burst-" + st.code, level: "buy", text: b.kind + " " + C.displayCode(st.code) + " 入场 " + b.entry + " 止损 " + b.stop + " 目标 " + b.target }); } catch (e) {}
+      }
+    } else {
+      html += '<div class="sigwhy">当前无有效异动（盘中扫描：3 分钟量能 ≥2× 且收回均价/突破前高才触发）</div>';
+    }
+    (b.warn || []).forEach(function (w) { html += '<div class="sigveto">⚠ ' + w + "</div>"; });
+    // 今日触发记录
+    var logs = (st.burstLog || []).filter(function (x) { return x.date === today; }).slice(-5).reverse();
+    if (logs.length) {
+      html += '<div class="sigwhy" style="margin-top:2px"><b>今日触发</b></div>';
+      logs.forEach(function (x) {
+        var stTxt = "跟踪中";
+        if (metrics && x.target != null && metrics.price >= x.target) stTxt = "✅ 已达目标";
+        else if (metrics && x.stop != null && metrics.price <= x.stop) stTxt = "❌ 已止损";
+        html += '<div class="washrow"><span class="lw">' + x.hhmm + " " + (x.name || C.displayCode(x.code)) + "</span><span>" +
+          x.kind + " · 入场 " + x.entry + " · 止损 " + x.stop + " · 目标 " + x.target + " · RR " + (x.rr == null ? "--" : x.rr.toFixed(2)) + " · " + stTxt + "</span></div>";
+      });
+    }
+    html += '<div class="sigwhy" style="font-size:10.5px">这是"盘中试探信号"（RR≥1.3 即可，正式建仓要 ≥2）：仓位 ≤ 常规 1/3，止损必须快；A 股 T+1，今天买明天才能卖。</div>';
+    box.innerHTML = html;
+    if (meta) meta.textContent = b.side === "long" ? "试探买点" : (b.warn && b.warn.length ? "警告" : "扫描中");
   }
 
   function renderEntryCard() {
@@ -4492,6 +4653,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         }
         render(metrics, p.points);
         try { renderSignalCard(); } catch (e) { /* 指标不足时不阻塞行情 */ }
+        try { renderBurstCard(); } catch (e) { /* 敏捷信号失败不阻塞 */ }
         try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
         try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
         try {
@@ -4764,6 +4926,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   renderChips(); renderPlanSummary(); bindPosInputs();
   try { fetchWatchNames(); } catch (e) {}
   try { renderLocalCard(); } catch (e) {}
+  try { renderBurstCard(); } catch (e) {}
   try { renderEntryCard(); } catch (e) {}
   try { renderEntryTrackCard(); } catch (e) {}
   tick(false);
