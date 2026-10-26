@@ -1295,5 +1295,15 @@ const pwIn = C.poolWindow(new Date(2026, 9, 22, 14, 55));
 ok("14:55 在窗口内", pwIn.inWindow === true && pwIn.afterClose === false, pwIn);
 ok("页面支持收盘后补生成（afterClose）", html.includes("afterClose") && html.includes("补生成一次"));
 
+
+/* ---------- 41) 回踩档 RR 与现价 RR 分开显示 ---------- */
+console.log("\n[回踩档RR]");
+const eaRR = C.entryAdvice({ price: 68.0, high: 70.0, low: 66.0, prevClose: 66.5, vwap: 68.2, vwapDevPct: 0.5, volRatio: 1.2 }, synth(2, 240, 0.01), C.multiPeriod(synth(2, 240, 0.01)), null,
+  { ok: true, reduce: [{ price: 69.5, why: "整数关口", qty: 0 }], add: [{ price: 67.2, why: "均价-1.2σ", qty: 0 }, { price: 66.6, why: "前低", qty: 0 }] },
+  { ok: true, grade: "B", score: 75, side: "long", vetoes: [], reasons: [] }, { ok: true, trend: "up", ma20: 64, ma60: 55 }, null, { shares: 0, cost: 0 }, "sz301218", { capital: 30000 });
+ok("回踩档 RR 字段存在", eaRR.rrZone != null, eaRR.rrZone);
+ok("回踩档 RR 优于现价 RR", eaRR.rrZone >= eaRR.rr, [eaRR.rr, eaRR.rrZone]);
+ok("页面区分现价RR/回踩档RR", html.includes("现价RR") && html.includes("回踩档RR") && html.includes("仓位上限"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

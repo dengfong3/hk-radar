@@ -2118,7 +2118,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       const budget = o.budget > 0 ? o.budget : defaultBudgetFor(code);
       const out = { ok: false, hasPosition: false, suitable: "no", verdict: "", reasons: [], vetoes: [],
         waitFor: [], zones: [], stop: null, target: null, rr: null, maxShares: null,
-        fullPos: null, riskAmount: null, capital, bandPct: null, tick: null, note: "" };
+        fullPos: null, riskAmount: null, rrZone: null, capital, bandPct: null, tick: null, note: "" };
       const shares0 = Math.max(0, Number((pos && pos.shares) || 0));
       if (shares0 > 0) {
         out.hasPosition = true;
@@ -2198,6 +2198,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       });
       out.maxShares = used;
       out.riskAmount = riskPer ? Math.round(used * riskPer) : null;
+      // 回踩档 RR：按建仓档中值（而不是现价）计算，避免"现价已涨上去导致 RR 看着很差"的误读
+      if (out.zones.length && out.stop && out.target) {
+        const z0 = out.zones[0];
+        const entryZ = (z0.lo + z0.hi) / 2;
+        const riskZ = entryZ - out.stop;
+        out.rrZone = riskZ > 0 ? (out.target - entryZ) / riskZ : null;
+      }
 
       // ---- 先等什么条件 ----
       const wait = [];
@@ -2876,7 +2883,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.39 · 2026-10-22";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.40 · 2026-10-26";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3330,7 +3337,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         (z.shares ? " · 约 " + z.shares + " 股 / " + z.amount + " 元" : " · 资金不足或仓位为 0") + "</span></div>";
     });
     html += '<div class="sigline"><span>止损 <b>' + (ea.stop == null ? "--" : ea.stop) + '</b></span><span>目标 <b>' + (ea.target == null ? "--" : ea.target) +
-      '</b></span><span>盈亏比 <b>' + (ea.rr == null ? "--" : ea.rr.toFixed(2)) + '</b></span><span>建议 <b>' + (ea.maxShares || 0) + " 股</b></span></div>";
+      '</b></span><span>现价RR <b>' + (ea.rr == null ? "--" : ea.rr.toFixed(2)) +
+      '</b></span><span>回踩档RR <b>' + (ea.rrZone == null ? "--" : ea.rrZone.toFixed(2)) +
+      '</b></span><span>仓位上限 <b>' + (ea.maxShares || 0) + " 股</b></span></div>";
     html += '<div class="sigwhy">本金 ' + Math.round(ea.capital) + " · 满仓上限 " + ea.fullPos + " 股 · 按止损风险约 " + (ea.riskAmount == null ? "--" : ea.riskAmount) + " 元 · 带宽 ±" + (ea.bandPct == null ? "--" : ea.bandPct) + "%</div>";
     if (ea.waitFor.length) html += '<div class="sigwhy">先等条件：' + ea.waitFor.join(" · ") + "</div>";
     html += '<div class="sigwhy" style="font-size:10.5px">' + ea.note + "</div>";
