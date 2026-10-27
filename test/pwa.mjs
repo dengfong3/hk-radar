@@ -768,7 +768,7 @@ const histPools = [
 ];
 const histLines = C.poolHistoryLines(histPools, 10);
 ok("历史：2 天且按日期倒序", histLines.length === 2 && histLines[0].date === "2026-10-19", histLines.map((x) => x.date));
-ok("历史：已验证行含次日统计", histLines[1].verified && histLines[1].text.indexOf("次日 1/2 上涨") >= 0 && histLines[1].text.indexOf("+0.50%") >= 0, histLines[1].text);
+ok("历史：已验证行含次日统计", histLines[1].verified && histLines[1].text.indexOf("次日开盘 1/2 上涨") >= 0 && histLines[1].text.indexOf("+0.50%") >= 0, histLines[1].text);
 ok("历史：已验证行含个股明细", histLines[1].per.indexOf("生益科技 +2.1%") >= 0, histLines[1].per);
 ok("历史：待验证行标注", histLines[0].verified === false && histLines[0].text.indexOf("待次日验证") >= 0, histLines[0].text);
 ok("页面含清空历史按钮", html.includes("btnPoolClear") && html.includes("观察池历史"));
@@ -783,7 +783,7 @@ try { h5.run(coreSrc); h5.run(uiSrc); } catch (e) { threw5 = e; }
 ok("渲染：历史场景无异常", !threw5, threw5 && threw5.message);
 await new Promise((r) => setTimeout(r, 200));
 ok("渲染：出现『观察池历史』", h5.deep("poolBox").indexOf("观察池历史") >= 0, h5.deep("poolBox").slice(0, 120));
-ok("渲染：历史含次日统计文案", h5.deep("poolBox").indexOf("次日 1/2 上涨") >= 0, h5.deep("poolBox").slice(0, 300));
+ok("渲染：历史含次日统计文案", h5.deep("poolBox").indexOf("次日开盘 1/2 上涨") >= 0, h5.deep("poolBox").slice(0, 300));
 
 
 /* ---------- 20) 台账分股标识 ---------- */
@@ -1397,6 +1397,23 @@ const bsSellFlat = C.intradayBurst(sf.m, sf.points, null, sellRefs, sellDaily, n
 ok("空仓时卖点标记为观察（不买入）", bsSellFlat.side === "sell" && bsSellFlat.holding === false, [bsSellFlat.side, bsSellFlat.holding]);
 ok("页面含卖点展示", html.includes("回升失效") && html.includes("减仓/卖出") && html.includes("观察卖点"));
 ok("触发记录区分买卖方向", html.includes('x.side === "sell"'));
+
+
+/* ---------- 46) 观察池次日验证（日线口径） ---------- */
+console.log("\n[观察池次日验证]");
+const pvPicks = [{ code: "sh601166", name: "兴业银行", price: 20 }, { code: "sz300750", name: "宁德时代", price: 200 }, { code: "sz000001", name: "平安银行", price: 11 }];
+const pvBars = {
+  "sh601166": [{ date: "2026-10-23", o: 19.8, c: 20.0 }, { date: "2026-10-26", o: 20.1, c: 20.3 }],
+  "sz300750": [{ date: "2026-10-23", o: 198, c: 200 }, { date: "2026-10-26", o: 198.5, c: 199 }],
+  "sz000001": []
+};
+const pv = C.poolVerifyStats(pvPicks, pvBars, "2026-10-23");
+ok("取池子日期之后第一根日线", pv.n === 2 && pv.nextDate === "2026-10-26", [pv.n, pv.nextDate]);
+ok("开盘口径涨跌正确", Math.abs(pv.rows[0].openPct - 0.5) < 1e-9 && Math.abs(pv.rows[1].openPct - -0.75) < 1e-9, pv.rows);
+ok("收盘口径也给出", pv.avgClosePct != null && Math.abs(pv.rows[0].closePct - 1.5) < 1e-9, pv.rows);
+ok("命中按开盘上涨计算", pv.up === 1 && Math.abs(pv.hitRate - 50) < 1e-9, [pv.up, pv.hitRate]);
+ok("无日线股票自动跳过", pv.n === 2, pv.n);
+ok("页面验证改用日线口径", html.includes("poolVerifyStats") && html.includes("次日开盘"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

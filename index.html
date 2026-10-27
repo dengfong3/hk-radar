@@ -1747,6 +1747,42 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       } catch (e) { return null; }
     }
     /** 观察池历史（按日期倒序），返回可直接渲染的行 */
+    /**
+     * 观察池次日验证（用日线 K 线，支持补验历史遗漏的日期）：
+     * 以池子当天收盘价为基准，取「池子日期之后的第一根日线」= 次一交易日；
+     * 主口径 = 次日开盘涨跌（隔夜跳空），同时给出次日收盘涨跌。
+     * barsByCode: { code: bars[] }，bars 来自 parseTencentKline（date/o/h/l/c/v）。
+     */
+    function poolVerifyStats(records, barsByCode, poolDate) {
+      const out = { n: 0, up: 0, down: 0, flat: 0, avgPct: null, avgClosePct: null, hitRate: null, rows: [], nextDate: "" };
+      for (const r of records || []) {
+        const bars = barsByCode && (barsByCode[r.code] || barsByCode[r.fullCode]);
+        if (!bars || !bars.length) continue;
+        const base = num(r.close != null ? r.close : r.price);
+        if (!(base > 0)) continue;
+        let nb = null;
+        for (const b of bars) {
+          if (String(b.date) > String(poolDate || "")) { nb = b; break; }
+        }
+        if (!nb || !(num(nb.o) > 0)) continue;
+        const openPct = (num(nb.o) / base - 1) * 100;
+        const closePct = num(nb.c) > 0 ? (num(nb.c) / base - 1) * 100 : null;
+        out.n++;
+        if (openPct > 0.05) out.up++;
+        else if (openPct < -0.05) out.down++;
+        else out.flat++;
+        out.rows.push({ code: r.code, name: r.name, chgPct: openPct, openPct, closePct, date: nb.date });
+        if (!out.nextDate || String(nb.date) < out.nextDate) out.nextDate = String(nb.date);
+      }
+      if (out.n) {
+        out.avgPct = out.rows.reduce((s, x) => s + x.openPct, 0) / out.n;
+        const cs = out.rows.filter((x) => x.closePct != null);
+        out.avgClosePct = cs.length ? cs.reduce((s, x) => s + x.closePct, 0) / cs.length : null;
+        out.hitRate = out.up / out.n * 100;
+      }
+      return out;
+    }
+
     function poolHistoryLines(pools, limit) {
       const list = (pools || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, limit || 10);
       const out = [];
@@ -1756,8 +1792,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         const rec = { date: p.date, mmdd, n: (p.picks || []).length, per: "", verified: false, text: "" };
         if (v && v.n) {
           rec.verified = true;
-          rec.text = mmdd + " · " + rec.n + " 只 · 次日 " + v.up + "/" + v.n + " 上涨 · 平均 " +
-            (v.avgPct >= 0 ? "+" : "") + v.avgPct.toFixed(2) + "%";
+          rec.text = mmdd + " · " + rec.n + " 只 · 次日开盘 " + v.up + "/" + v.n + " 上涨 · 开盘均 " +
+            (v.avgPct >= 0 ? "+" : "") + v.avgPct.toFixed(2) + "%" +
+            (v.avgClosePct != null ? " · 收盘均 " + (v.avgClosePct >= 0 ? "+" : "") + v.avgClosePct.toFixed(2) + "%" : "");
           rec.per = (v.rows || []).slice(0, 6).map((r) => r.name + (r.chgPct >= 0 ? " +" : " ") + r.chgPct.toFixed(1) + "%").join(" · ");
         } else {
           rec.text = mmdd + " · " + rec.n + " 只 · 待次日验证";
@@ -3003,7 +3040,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     limitPctOf: limitPctOf, limitStateOf: limitStateOf,
     washoutDetect: washoutDetect,
     parseTencentKline: parseTencentKline, dailyTrend: dailyTrend, atrCalc: atrCalc, orderBookStats: orderBookStats,
-    poolWindow: poolWindow, rankPoolCandidates: rankPoolCandidates, parseBatchSnapshot: parseBatchSnapshot, poolHitStats: poolHitStats, limitPctOfCode: limitPctOfCode,
+    poolWindow: poolWindow, rankPoolCandidates: rankPoolCandidates, parseBatchSnapshot: parseBatchSnapshot, poolVerifyStats: poolVerifyStats, poolHitStats: poolHitStats, limitPctOfCode: limitPctOfCode,
     poolHistoryLines: poolHistoryLines,
     poolTargetOf: poolTargetOf,
     buildBrief: buildBrief, sessionPhase: sessionPhase, briefDeadlines: briefDeadlines, segmentStats: segmentStats, prevDailyBar: prevDailyBar,
@@ -3034,7 +3071,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.44 · 2026-10-27";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.45 · 2026-10-27";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3215,6 +3252,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var mine = null;
     for (var i = pools.length - 1; i >= 0; i--) if (pools[i].date === today) { mine = pools[i]; break; }
     var html = "";
+    if (meta) meta.textContent = mine ? "已生成" : (poolBuilding ? "生成中…" : "未生成");
     if (!mine) {
       html += '<div class="sigwhy">14:50 起自动生成，窗口内每 3 分钟刷新一次（留出买入时间）；<b>错过窗口的话，收盘后打开也会自动补生成一次（收盘数据）</b>。也可以手动生成。</div>';
       html += '<div><button class="ledclear" id="btnPoolGen">立即生成今日观察池</button></div>';
@@ -4618,26 +4656,53 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     };
     next();
   }
+  var poolBarCache = {}, poolVerifyBusy = false;
+  function fetchPoolBars(code) {
+    if (poolBarCache[code]) return Promise.resolve(poolBarCache[code]);
+    var url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=" + encodeURIComponent(code) + ",day,,,260,qfq";
+    return fetch(url, { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("日线 HTTP " + r.status); return r.json(); })
+      .then(function (j) {
+        var k = C.parseTencentKline(j, code);
+        if (!k.ok) throw new Error("日线无数据");
+        poolBarCache[code] = k.bars;
+        return k.bars;
+      });
+  }
+
+  /**
+   * 观察池次日验证（v0.45 重写）：
+   * 旧版用"当前快照涨跌"验证，既查不到历史遗漏日、也把多天前池子按今天行情算 →
+   * 且引用了 picks.fullCode（不存在），stats.n 永远 0，所以一直"待次日验证"。
+   * 新版：按池子日期逐只拉日线，取池子日期之后的第一根日线 = 次一交易日，
+   * 用次日开盘价（隔夜跳空）为主口径、次日收盘为辅口径；一次验证一天，历史遗漏逐日补。
+   */
   function verifyPools() {
+    if (poolVerifyBusy) return;
     var today = todayKey();
-    var pend = (st.pools || []).filter(function (p) { return p.date < today && !p.verify; });
+    var pend = (st.pools || []).filter(function (p) { return p.date < today && !p.verify; })
+      .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
     if (!pend.length) return;
-    for (var i = 0; i < pend.length; i++) {
-      (function (pool) {
-        var codes = pool.picks.map(function (p) { return p.code; }).join(",");
-        fetch("https://qt.gtimg.cn/q=" + codes, { cache: "no-store" })
-          .then(function (r) { return r.arrayBuffer(); })
-          .then(function (buf) {
-            var quotes = C.parseBatchSnapshot(C.decodeText(buf, "gbk"));
-            var stats = C.poolHitStats(pool.picks, quotes);
-            if (!stats.n) return;
-            pool.verify = { at: Date.now(), stats: stats };
-            save({ pools: st.pools });
-            renderPoolCard();
-          })
-          .catch(function () {});
-      })(pend[i]);
+    poolVerifyBusy = true;
+    var pool = pend[0];
+    var picks = pool.picks || [];
+    var bars = {}, idx = 0;
+    function done() {
+      poolVerifyBusy = false;
+      var stats = C.poolVerifyStats(picks, bars, pool.date);
+      if (!stats.n) return;
+      pool.verify = { at: Date.now(), basis: "next-open", stats: stats, nextDate: stats.nextDate };
+      save({ pools: st.pools });
+      try { renderPoolCard(); } catch (e) {}
     }
+    function next() {
+      if (idx >= picks.length) { done(); return; }
+      var pick = picks[idx++];
+      fetchPoolBars(pick.code)
+        .then(function (bs) { bars[pick.code] = bs; setTimeout(next, 120); })
+        .catch(function () { setTimeout(next, 120); });
+    }
+    next();
   }
   function poolStatsAll() {
     var all = { n: 0, up: 0, avg: 0, days: 0 };
