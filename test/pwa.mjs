@@ -1358,5 +1358,45 @@ const burstTxt = hBurst.deep("burstBox");
 ok("不显示其他股票的触发记录", burstTxt.indexOf("江淮") < 0, burstTxt.slice(0, 200));
 ok("显示本股触发记录", burstTxt.indexOf("中际旭创") >= 0, burstTxt.slice(0, 220));
 
+
+/* ---------- 44) 触发时间显示补冒号 ---------- */
+console.log("\n[触发时间显示]");
+ok("fmtHhmm 1445 → 14:45", C.fmtHhmm("1445") === "14:45", C.fmtHhmm("1445"));
+ok("fmtHhmm 938 → 09:38", C.fmtHhmm("938") === "09:38", C.fmtHhmm("938"));
+ok("fmtHhmm 空值不崩", C.fmtHhmm(null) === "--", C.fmtHhmm(null));
+const hTime = makeHarness({
+  code: "sz300308", watch: ["sz300308"], sound: false, chartMode: "min",
+  pos: {}, plans: {}, trade: {}, lastFired: {}, ledger: { records: [] }, pools: [], briefs: {}, entryTrack: [],
+  burstLog: [{ ts: Date.now(), date: C.todayStr(), code: "sz300308", name: "中际旭创", hhmm: "1445", kind: "放量收回均价", entry: 180, stop: 178, target: 186, rr: 5.51 }]
+}, (code) => aSharePayload());
+let threwTime = null;
+try { hTime.run(coreSrc); hTime.run(uiSrc); } catch (e) { threwTime = e; }
+ok("时间显示场景无异常", !threwTime, threwTime && threwTime.message);
+await new Promise((r) => setTimeout(r, 300));
+const timeTxt = hTime.deep("burstBox");
+ok("卡片显示 14:45 而不是 1445", timeTxt.indexOf("14:45") >= 0 && timeTxt.indexOf("1445 ") < 0, timeTxt.slice(0, 200));
+
+
+/* ---------- 45) 敏捷卖点（减仓/卖出） ---------- */
+console.log("\n[敏捷卖点]");
+function sellFixture() {
+  const pts = [];
+  for (let i = 0; i < 20; i++) pts.push({ hhmm: "0950", slot: i, price: 19.5, volInc: 100000, cumVol: 100000 * (i + 1), vwap: 19.5 });
+  const path = [19.4, 19.3, 19.2];
+  for (let i = 0; i < 3; i++) pts.push({ hhmm: "100" + i, slot: 20 + i, price: path[i], volInc: 400000, cumVol: 2000000 + 400000 * (i + 1), vwap: 19.5 });
+  return { points: pts, m: { price: 19.2, open: 19.5, high: 19.6, low: 18.0, prevClose: 19.6, changePct: (19.2 / 19.6 - 1) * 100, vwap: 19.5, vwapDevPct: (19.2 - 19.5) / 19.5 * 100 } };
+}
+const sellRefs = { ok: true, reduce: [], add: [{ price: 18.5, why: "前低", qty: 0 }] };
+const sellDaily = { ok: true, low20: 18.4, ma20: 18.0, ma60: 17.0, high20: 21.0 };
+const sf = sellFixture();
+const bsSellHold = C.intradayBurst(sf.m, sf.points, null, sellRefs, sellDaily, null, "sh600418", { pos: { shares: 200, cost: 20 } });
+ok("放量跌破均价 → 持仓卖出信号", bsSellHold.side === "sell" && bsSellHold.holding === true, [bsSellHold.side, bsSellHold.kind]);
+ok("卖出信号给出卖出价/回升失效/下跌目标", bsSellHold.entry > bsSellHold.target && bsSellHold.stop > bsSellHold.entry, [bsSellHold.entry, bsSellHold.stop, bsSellHold.target]);
+ok("卖出信号 RR≥1.2", bsSellHold.rr >= 1.2, bsSellHold.rr);
+const bsSellFlat = C.intradayBurst(sf.m, sf.points, null, sellRefs, sellDaily, null, "sh600418", { pos: { shares: 0, cost: 0 } });
+ok("空仓时卖点标记为观察（不买入）", bsSellFlat.side === "sell" && bsSellFlat.holding === false, [bsSellFlat.side, bsSellFlat.holding]);
+ok("页面含卖点展示", html.includes("回升失效") && html.includes("减仓/卖出") && html.includes("观察卖点"));
+ok("触发记录区分买卖方向", html.includes('x.side === "sell"'));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

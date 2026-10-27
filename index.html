@@ -1790,6 +1790,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     /* ================= 每日简报：盘前 / 午间 / 盘后 ================= */
 
 
+
+    /** "1445" → "14:45"（分钟序列的 hhmm 没有冒号，直接显示会像 1445 这样的数字） */
+    function fmtHhmm(hhmm) {
+      const s = String(hhmm == null ? "" : hhmm).replace(/[^0-9]/g, "");
+      if (s.length === 4) return s.slice(0, 2) + ":" + s.slice(2);
+      if (s.length === 3) return "0" + s.slice(0, 1) + ":" + s.slice(1);
+      return String(hhmm == null ? "--" : hhmm);
+    }
+
     /** ISO(UTC) 时间 → 本地时间显示（避免直接截取 UTC 字符串导致差 8 小时） */
     function fmtLocalTime(iso) {
       if (!iso) return "";
@@ -2124,7 +2133,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     function intradayBurst(m, points, mp, refs, daily, order, code, opt) {
       const o = opt || {};
       const out = { ok: false, side: "none", kind: "", entry: null, stop: null, target: null, rr: null,
-        volX: null, reasons: [], warn: [], at: "", sessionMin: 0, sizeHint: "" };
+        volX: null, reasons: [], warn: [], at: "", sessionMin: 0, sizeHint: "", holding: false, sell: null };
       if (!m || !(m.price > 0)) return out;
       const pts = (points || []).filter((p) => p && p.price > 0);
       if (pts.length < 12) return out;
@@ -2160,6 +2169,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       const bigVol = volX != null && volX >= 2.0;
       const early = n < 15;
       const tick = tickOf(code, price);
+      const holding = !!(o.pos && o.pos.shares > 0);
+      out.holding = holding;
 
       const cands = [];
       if (!early && crossedUp && bigVol && chg != null && chg > -1 && dev != null && dev <= 4 && price > open) {
@@ -2209,7 +2220,37 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
             "（目标 " + target.toFixed(2) + " / 止损 " + stop.toFixed(2) + "），不做");
         }
       }
-      if (!pick && bigVol && dayHighNear && dev != null && dev > 4.5) out.warn.push("放量但距均价 +" + dev.toFixed(1) + "%，追高风险不追");
+      // ---- 卖出侧（敏捷卖点）：放量跌破均价 / 放量破日内低 / 冲高回落 ----
+      let sellCand = null;
+      if (vwap != null && belowVwap && bigVol && chg != null && chg < 0.5) sellCand = { kind: "放量跌破均价", level: vwap, strength: 3 };
+      if (low != null && price <= low * 1.003 && bigVol && chg != null && chg < 0) sellCand = { kind: "放量破日内低", level: low, strength: 4 };
+      if (high != null && price <= high * 0.985 && volX != null && volX >= 1.5 && chg != null && chg > 0) sellCand = { kind: "冲高回落", level: high, strength: 2 };
+      if (sellCand) {
+        const supList = [];
+        if (refs && refs.add) refs.add.forEach((r) => { if (r && r.price < price * 0.996) supList.push(r.price); });
+        if (low != null && low < price * 0.996) supList.push(low);
+        if (daily && daily.ok) [daily.ma20, daily.ma60, daily.low20].forEach((x) => { if (x != null && x < price * 0.996) supList.push(x); });
+        supList.sort((a, b) => b - a);
+        const downside = supList.length ? supList[0] : price * 0.98;
+        const invalid = Math.max(price * 1.004, vwap != null ? vwap * 1.004 : price * 1.01);
+        const riskS = invalid - price;
+        const rrS = riskS > 0 ? (price - downside) / riskS : null;
+        if (rrS != null && rrS >= 1.2 && riskS / price <= 0.025) {
+          out.sell = { kind: sellCand.kind, entry: roundTick(price, tick), stop: roundTick(invalid, tick), target: roundTick(downside, tick), rr: rrS };
+          out.warn.push(sellCand.kind + " → 卖出/减仓信号（下跌目标 " + out.sell.target + "，回升失效位 " + out.sell.stop + "）");
+          if (holding || out.side !== "long") {
+            out.side = "sell";
+            out.kind = sellCand.kind;
+            out.entry = out.sell.entry; out.stop = out.sell.stop; out.target = out.sell.target; out.rr = rrS;
+            out.reasons = [holding ? "持仓：" + sellCand.kind + " → 减仓/卖出" : "空仓：出现卖点，仅观察（不买入）",
+              "下跌目标 " + out.sell.target + " · 回升失效位 " + out.sell.stop];
+            out.sizeHint = holding
+              ? "先减一半，跌破目标再减；A 股 T+1：当日买入不可卖"
+              : "空仓观察：等重新站回均价再考虑买点";
+          }
+        }
+      }
+      if (!pick && !out.sell && bigVol && dayHighNear && dev != null && dev > 4.5) out.warn.push("放量但距均价 +" + dev.toFixed(1) + "%，追高风险不追");
       if (volX != null && volX < 0.7 && chg != null && chg > 1.5) out.warn.push("价涨量缩（量能 " + volX.toFixed(2) + "×），别追");
       if (belowVwap && bigVol && chg != null && chg < 0.5) out.warn.push("放量跌破均价（" + vwap.toFixed(2) + "）→ 持仓减仓警告");
       if (low != null && price <= low * 1.003 && bigVol && chg != null && chg < 0) out.warn.push("放量破日内低 " + low.toFixed(2) + " → 减仓警告");
@@ -2976,6 +3017,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     buildBackup: buildBackup, parseBackup: parseBackup,
     chgClass: chgClass,
     fmtLocalTime: fmtLocalTime,
+    fmtHhmm: fmtHhmm,
     parseSinaRank: parseSinaRank,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
@@ -2992,7 +3034,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.42 · 2026-10-26";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.44 · 2026-10-27";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3435,47 +3477,62 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var points = allPointsNow();
     var pos = curPos();
     var refs = C.intradayRefs(metrics, points, pos, { code: st.code, plan: curPlan() });
-    var b = C.intradayBurst(metrics, points, mpData, refs, dailyData, orderData, st.code, {});
-    var html = "";
-    var today = C.todayStr();
-    if (b.ok && b.side === "long") {
-      html += '<div class="sighead"><span class="siggrade A">试探买点</span><span class="sigscore">' +
-        b.kind + " · 量能 " + (b.volX == null ? "--" : b.volX.toFixed(1) + "×") + " · " + b.at + "</span></div>";
-      html += '<div class="sigline"><span>入场 <b>' + b.entry + '</b></span><span>止损 <b>' + b.stop +
-        '</b></span><span>目标 <b>' + b.target + '</b></span><span>RR <b>' + (b.rr == null ? "--" : b.rr.toFixed(2)) +
-        '</b></span></div>';
+    var b = C.intradayBurst(metrics, points, mpData, refs, dailyData, orderData, st.code, { pos: pos });
+    var html = "", today = C.todayStr();
+    var isSell = b.ok && b.side === "sell";
+    if (b.ok && (b.side === "long" || b.side === "sell")) {
+      var badge = isSell ? (b.holding ? "减仓/卖出" : "观察卖点") : "试探买点";
+      html += '<div class="sighead"><span class="siggrade ' + (isSell ? "C" : "A") + '">' + badge + '</span><span class="sigscore">' +
+        b.kind + " · 量能 " + (b.volX == null ? "--" : b.volX.toFixed(1) + "×") + " · " + C.fmtHhmm(b.at) + "</span></div>";
+      if (isSell) {
+        html += '<div class="sigline"><span>卖出价 <b>' + b.entry + '</b></span><span>回升失效 <b>' + b.stop +
+          '</b></span><span>下跌目标 <b>' + b.target + '</b></span><span>RR <b>' + (b.rr == null ? "--" : b.rr.toFixed(2)) + '</b></span></div>';
+      } else {
+        html += '<div class="sigline"><span>入场 <b>' + b.entry + '</b></span><span>止损 <b>' + b.stop +
+          '</b></span><span>目标 <b>' + b.target + '</b></span><span>RR <b>' + (b.rr == null ? "--" : b.rr.toFixed(2)) + '</b></span></div>';
+      }
       if (b.reasons.length) html += '<div class="sigwhy">' + b.reasons.join(" · ") + "</div>";
-      html += '<div class="sigveto" style="color:#fde68a">' + (b.sizeHint || "") + "</div>";
-      // 新触发 → 记日志 + 通知（同一代码+类型 30 分钟内只提醒一次）
-      var key = today + ":" + st.code + ":" + b.kind + ":" + b.at;
+      if (b.sizeHint) html += '<div class="sigveto" style="color:#fde68a">' + b.sizeHint + "</div>";
+      var key = today + ":" + st.code + ":" + (isSell ? "sell" : "buy") + ":" + b.kind + ":" + b.at;
       if (key !== burstLastKey && Date.now() - burstLastAt > 1800000) {
         burstLastKey = key; burstLastAt = Date.now();
         st.burstLog = (st.burstLog || []).filter(function (x) { return x.ts > Date.now() - 86400000; });
         st.burstLog.push({ ts: Date.now(), date: today, code: st.code, name: (parsed && parsed.quote && parsed.quote.name) || "",
-          hhmm: b.at, kind: b.kind, entry: b.entry, stop: b.stop, target: b.target, rr: b.rr });
+          hhmm: b.at, kind: b.kind, entry: b.entry, stop: b.stop, target: b.target, rr: b.rr, side: isSell ? "sell" : "buy" });
         if (st.burstLog.length > 30) st.burstLog = st.burstLog.slice(-30);
         save({ burstLog: st.burstLog });
-        try { if (typeof notify === "function") notify({ id: "burst-" + st.code, level: "buy", text: b.kind + " " + C.displayCode(st.code) + " 入场 " + b.entry + " 止损 " + b.stop + " 目标 " + b.target }); } catch (e) {}
+        try {
+          if (typeof notify === "function") notify({ id: "burst-" + st.code, level: isSell ? "warn" : "buy",
+            text: isSell ? ("减仓警告 " + b.kind + " " + C.displayCode(st.code) + " 卖出 " + b.entry + " 回补/失效 " + b.stop)
+                         : (b.kind + " " + C.displayCode(st.code) + " 入场 " + b.entry + " 止损 " + b.stop + " 目标 " + b.target) });
+        } catch (e) {}
       }
     } else {
       html += '<div class="sigwhy">当前无有效异动（盘中扫描：3 分钟量能 ≥2× 且收回均价/突破前高才触发）</div>';
     }
+    if (b.sell && !isSell) html += '<div class="sigveto">⚠ 同时出现卖点：' + b.sell.kind + "（下跌目标 " + b.sell.target + "，回升失效 " + b.sell.stop + "）</div>";
     (b.warn || []).forEach(function (w) { html += '<div class="sigveto">⚠ ' + w + "</div>"; });
-    // 今日触发记录
     var logs = (st.burstLog || []).filter(function (x) { return x.date === today && x.code === st.code; }).slice(-5).reverse();
     if (logs.length) {
       html += '<div class="sigwhy" style="margin-top:2px"><b>今日触发（本股）</b></div>';
       logs.forEach(function (x) {
         var stTxt = "跟踪中";
-        if (metrics && x.target != null && metrics.price >= x.target) stTxt = "✅ 已达目标";
-        else if (metrics && x.stop != null && metrics.price <= x.stop) stTxt = "❌ 已止损";
-        html += '<div class="washrow"><span class="lw">' + x.hhmm + " " + (x.name || C.displayCode(x.code)) + "</span><span>" +
-          x.kind + " · 入场 " + x.entry + " · 止损 " + x.stop + " · 目标 " + x.target + " · RR " + (x.rr == null ? "--" : x.rr.toFixed(2)) + " · " + stTxt + "</span></div>";
+        if (x.side === "sell") {
+          if (metrics && x.target != null && metrics.price <= x.target) stTxt = "✅ 已达下跌目标";
+          else if (metrics && x.stop != null && metrics.price >= x.stop) stTxt = "❌ 已失效(回升)";
+        } else {
+          if (metrics && x.target != null && metrics.price >= x.target) stTxt = "✅ 已达目标";
+          else if (metrics && x.stop != null && metrics.price <= x.stop) stTxt = "❌ 已止损";
+        }
+        html += '<div class="washrow"><span class="lw">' + (x.side === "sell" ? "卖 " : "买 ") + C.fmtHhmm(x.hhmm) + " " + (x.name || C.displayCode(x.code)) + "</span><span>" +
+          x.kind + " · " + (x.side === "sell" ? ("卖出 " + x.entry + " · 目标 " + x.target + " · 回升失效 " + x.stop)
+            : ("入场 " + x.entry + " · 止损 " + x.stop + " · 目标 " + x.target)) +
+          " · RR " + (x.rr == null ? "--" : x.rr.toFixed(2)) + " · " + stTxt + "</span></div>";
       });
     }
-    html += '<div class="sigwhy" style="font-size:10.5px">这是"盘中试探信号"（RR≥1.3 即可，正式建仓要 ≥2）：仓位 ≤ 常规 1/3，止损必须快；A 股 T+1，今天买明天才能卖。</div>';
+    html += '<div class="sigwhy" style="font-size:10.5px">买卖点同一套规则：买点是"试探仓"（RR≥1.3，仓位≤常规 1/3）；卖点是"减仓/卖出"（放量跌破均价、破日内低、冲高回落）。A 股 T+1，今天买明天才能卖。</div>';
     box.innerHTML = html;
-    if (meta) meta.textContent = b.side === "long" ? "试探买点" : (b.warn && b.warn.length ? "警告" : "扫描中");
+    if (meta) meta.textContent = b.side === "sell" ? (b.holding ? "减仓/卖出" : "观察卖点") : (b.side === "long" ? "试探买点" : (b.warn && b.warn.length ? "警告" : "扫描中"));
   }
 
   function renderEntryCard() {
