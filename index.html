@@ -3076,7 +3076,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.46 · 2026-10-28";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.47 · 2026-10-28";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3757,6 +3757,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (sp.grade === "noTrade") {
       var vs = sp.vetoes.length ? sp.vetoes : ["条件不足"];
       html += '<div class="sigveto">不交易原因：' + vs.join("；") + "</div>";
+    } else if (sp.side === "none") {
+      // C 级且无方向：不生成任何交易参数，明确说明"为什么是 --"
+      html += '<div class="sigwhy"><b>C 级（无方向）：</b>多空信号互相抵消（评分 ' + sp.score +
+        '/100），系统不生成触发/止损/目标/股数——避免给出没有依据的点位。等评分进入 <b>B 级（≥62）</b>或 <b>A 级（≥75）</b>且无否决，才会给出交易参数。</div>';
+      html += '<div class="sigwhy">等待条件：' + sp.confirm + " · " + sp.timing + "</div>";
     } else {
       var mid = sp.entry ? (sp.entry.lo + sp.entry.hi) / 2 : null;
       html += '<div class="sigline"><span>触发 <b>' + (sp.entry ? sp.entry.lo.toFixed(2) + "–" + sp.entry.hi.toFixed(2) : "--") +
@@ -3799,7 +3804,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     });
     it += "</div>";
     html += it;
-    html += '<div class="sigwhy" style="font-size:10.5px">规则化加权评分，不是预测；A/B 级才记入台账用于统计。</div>';
+    html += '<div class="sigwhy" style="font-size:10.5px">规则化加权评分，不是预测；等级：<b>A ≥75</b> 可执行（等确认）· <b>B 62–74</b> 观察/轻仓 · <b>C &lt;62</b> 无方向不交易 · <b>不交易</b>=触发硬否决。A/B 级才记入台账。</div>';
     box.innerHTML = html;
     if (meta) meta.textContent = "共识评分";
     renderLedgerCard();

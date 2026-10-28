@@ -1415,5 +1415,11 @@ ok("命中按开盘上涨计算", pv.up === 1 && Math.abs(pv.hitRate - 50) < 1e-
 ok("无日线股票自动跳过", pv.n === 2, pv.n);
 ok("页面验证改用日线口径", html.includes("poolVerifyStats") && html.includes("次日开盘"));
 
+
+/* ---------- 47) C 级/无方向的解释 ---------- */
+console.log("\n[C级说明]");
+ok("页面解释 C 级无方向原因", html.includes("C 级（无方向）") && html.includes("避免给出没有依据的点位"));
+ok("页面给出等级门槛（A≥75 / B≥62 / C<62）", html.includes("A ≥75") && html.includes("B 62–74") && html.includes("C &lt;62"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
