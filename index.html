@@ -1620,6 +1620,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       out.pool = all.length;
       if (!all.length) return out;
       const limit = (opt && opt.limit) || 10;
+      const minScore = (opt && opt.minScore != null) ? opt.minScore : 6;
       const scored = [];
       for (const it of all) {
         const price = num(it.price), high = num(it.high), low = num(it.low), chg = num(it.chgPct);
@@ -1628,53 +1629,59 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         const tg = poolTargetOf(it.code, it.name);
         const reason = [], risk = [];
         let score = 0, skip = false, dev = null;
-        // 1) 收盘位置（涨跌都看：收在日内高位 = 承接好）
+        // 振幅（用涨跌幅反推昨收）
+        const prevClose = chg != null && chg > -99 ? price / (1 + chg / 100) : null;
+        const ampPct = prevClose && prevClose > 0 ? (high - low) / prevClose * 100 : null;
+        // 1) 收盘位置：收在日内 50% 以下 = 承接差 → 剔除；越高越好
         if (pos >= 0.85) { score += 5; reason.push("收在日内高位(" + Math.round(pos * 100) + "%)"); }
-        else if (pos >= 0.6) { score += 2; }
-        else risk.push("收盘回落(" + Math.round(pos * 100) + "%)");
-        // 2) 涨跌幅上限：主板 |涨跌|<5%、双创<8%（ST<2.5%）；涨停/跌停与超上限都剔除
-        if (chg != null) {
-          const ab = Math.abs(chg);
-          if (ab >= tg.limitPct * 0.98) {
-            skip = true;             // 涨停/跌停 → 剔除
-          } else if (ab >= tg.cap) {
-            skip = true;             // 超过上限（主板≥5%、双创≥8%）→ 剔除
-          } else {
-            dev = Math.abs(tg.cap - ab);
-            if (ab >= 0.5 && ab <= tg.near) {
-              score += 4; reason.push((chg >= 0 ? "涨" : "跌") + ab.toFixed(1) + "%（上限" + tg.cap + "%内）");
-            } else if (ab > tg.near) {
-              score += 2; risk.push("接近上限" + tg.cap + "%");
-            } else {
-              score += 1; risk.push("波动过小(" + ab.toFixed(1) + "%)");
-            }
-            if (chg < 0) reason.push("回调型");
-          }
+        else if (pos >= 0.7) { score += 3; reason.push("收在日内偏高(" + Math.round(pos * 100) + "%)"); }
+        else if (pos >= 0.5) { score += 1; risk.push("收盘位置一般(" + Math.round(pos * 100) + "%)"); }
+        else skip = true;
+        // 2) 振幅：>12% 巨震 → 剔除；2%–10% 健康
+        if (ampPct != null) {
+          if (ampPct > 12) skip = true;
+          else if (ampPct >= 2 && ampPct <= 10) score += 1;
         }
-        // 3) 量比：1.2–3 健康；>5 过热
+        // 3) 涨跌幅：接近目标上限 90% 即透支（次日溢价已被吃掉）→ 剔除；温和上涨最优
+        if (!skip && chg != null) {
+          const ab = Math.abs(chg);
+          if (ab >= tg.limitPct * 0.98 || ab >= tg.cap * 0.9) {
+            skip = true;
+          } else if (ab >= 1.2 && ab <= tg.cap * 0.6) {
+            score += 4; reason.push((chg >= 0 ? "涨" : "跌") + ab.toFixed(1) + "%（温和，未透支）");
+          } else if (ab >= 0.5) {
+            score += 2; risk.push("涨幅偏大" + ab.toFixed(1) + "%（>上限60%）");
+          } else {
+            score += 1; risk.push("波动过小(" + ab.toFixed(1) + "%)");
+          }
+          if (chg < 0) reason.push("回调型");
+          dev = Math.abs(tg.cap - ab);
+        }
+        // 4) 量比：1.2–2.5 健康；>4 过热；备用源无此字段 → 不奖励也不罚
         const vr = num(it.volRatio);
         if (vr != null) {
-          if (vr >= 1.2 && vr <= 3) { score += 3; reason.push("量比" + vr.toFixed(1) + "(健康)"); }
-          else if (vr > 5) { score -= 2; risk.push("量比过热" + vr.toFixed(1)); }
-          else if (vr < 1) risk.push("量能不足");
+          if (vr >= 1.2 && vr <= 2.5) { score += 3; reason.push("量比" + vr.toFixed(1) + "(健康)"); }
+          else if (vr > 4) { score -= 2; risk.push("量比过热" + vr.toFixed(1)); }
+          else if (vr < 1) { score -= 1; risk.push("量能不足"); }
         }
-        // 4) 换手：2%–10% 健康；>15% 过热
+        // 5) 换手：2%–8% 健康；>18% 直接剔除
         const to = num(it.turnover);
         if (to != null) {
-          if (to >= 2 && to <= 10) { score += 2; reason.push("换手" + to.toFixed(1) + "%"); }
-          else if (to > 15) { score -= 3; risk.push("换手过热" + to.toFixed(1) + "%"); }
+          if (to > 18) skip = true;
+          else if (to >= 2 && to <= 8) { score += 2; reason.push("换手" + to.toFixed(1) + "%"); }
+          else if (to <= 12) score += 1;
+          else { score -= 2; risk.push("换手过热" + to.toFixed(1) + "%"); }
         }
-        // 5) 主力资金
+        // 6) 主力资金：净流出 → 剔除（不替出货方接盘）；净流入加分
         const flow = num(it.flowAmt), fp = num(it.flowPct);
         if (flow != null) {
-          if (flow > 0 && (fp == null || fp >= 5)) { score += 4; reason.push("主力净流入" + (flow / 1e8).toFixed(2) + "亿"); }
-          else if (flow > 0) { score += 1; reason.push("主力小幅流入"); }
-          else { score -= 3; risk.push("主力净流出"); }
+          if (flow < 0) skip = true;
+          else if (flow > 0) { score += (fp == null || fp >= 5) ? 4 : 2; reason.push("主力净流入" + (flow / 1e8).toFixed(2) + "亿"); }
         }
         if (skip) continue;
         scored.push({ code: it.code, name: it.name, price, chgPct: chg, posInDay: pos,
           volRatio: vr, turnover: to, flowAmt: flow, flowPct: fp, industry: it.industry || "",
-          score, dev, reasons: reason, risks: risk, lists: it.tags,
+          ampPct, score, dev, reasons: reason, risks: risk, lists: it.tags,
           capPct: tg.cap, targetBand: tg.cap, limitPct: tg.limitPct, dir: chg == null ? null : (chg >= 0 ? "up" : "down") });
       }
       scored.sort((a, b) => b.score - a.score || (b.flowAmt || 0) - (a.flowAmt || 0) ||
@@ -1692,10 +1699,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           picks = picks.concat(rest.slice(0, limit - picks.length));
         }
         picks.sort((a, b) => b.score - a.score || (b.flowAmt || 0) - (a.flowAmt || 0));
-        out.picks = picks;
+        out.picks = picks.filter((p) => p.score >= minScore);
       }
       out.ok = out.picks.length > 0;
-      out.note = "按今日收盘特征打分：主板 |涨跌幅|<5%、双创<8%（涨跌都可），已排除涨停/跌停；再看量比/换手/主力资金。不是次日上涨预测。";
+      out.note = "防透支版打分（v0.48）：温和上涨(1.2%~上限60%)、收在日内高位、量比1.2–2.5、换手2–8%、主力净流入；已剔除接近上限(≥90%目标)/振幅>12%/收在日内低位/换手>18%/主力净流出。宁缺毋滥，不是次日上涨预测。";
       return out;
     }
 
@@ -1759,7 +1766,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
      * barsByCode: { code: bars[] }，bars 来自 parseTencentKline（date/o/h/l/c/v）。
      */
     function poolVerifyStats(records, barsByCode, poolDate) {
-      const out = { n: 0, up: 0, down: 0, flat: 0, avgPct: null, avgClosePct: null, hitRate: null, rows: [], nextDate: "" };
+      const out = { n: 0, up: 0, down: 0, flat: 0, upMax: 0, nMax: 0, upClose: 0, nClose: 0,
+        avgPct: null, avgClosePct: null, avgMaxPct: null, hitRate: null, hitRateClose: null, hitRateMax: null, rows: [], nextDate: "" };
       for (const r of records || []) {
         const bars = barsByCode && (barsByCode[r.code] || barsByCode[r.fullCode]);
         if (!bars || !bars.length) continue;
@@ -1772,22 +1780,28 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         if (!nb || !(num(nb.o) > 0)) continue;
         const openPct = (num(nb.o) / base - 1) * 100;
         const closePct = num(nb.c) > 0 ? (num(nb.c) / base - 1) * 100 : null;
+        const maxPct = num(nb.h) > 0 ? (num(nb.h) / base - 1) * 100 : null;   // 次日最高：理论可卖出价
         out.n++;
         if (openPct > 0.05) out.up++;
         else if (openPct < -0.05) out.down++;
         else out.flat++;
-        out.rows.push({ code: r.code, name: r.name, chgPct: openPct, openPct, closePct, date: nb.date });
+        if (closePct != null) { out.nClose++; if (closePct > 0.05) out.upClose++; }
+        if (maxPct != null) { out.nMax++; if (maxPct > 0.05) out.upMax++; }
+        out.rows.push({ code: r.code, name: r.name, chgPct: openPct, openPct, closePct, maxPct, date: nb.date });
         if (!out.nextDate || String(nb.date) < out.nextDate) out.nextDate = String(nb.date);
       }
       if (out.n) {
         out.avgPct = out.rows.reduce((s, x) => s + x.openPct, 0) / out.n;
         const cs = out.rows.filter((x) => x.closePct != null);
         out.avgClosePct = cs.length ? cs.reduce((s, x) => s + x.closePct, 0) / cs.length : null;
+        const ms = out.rows.filter((x) => x.maxPct != null);
+        out.avgMaxPct = ms.length ? ms.reduce((s, x) => s + x.maxPct, 0) / ms.length : null;
         out.hitRate = out.up / out.n * 100;
+        out.hitRateClose = out.nClose ? out.upClose / out.nClose * 100 : null;
+        out.hitRateMax = out.nMax ? out.upMax / out.nMax * 100 : null;
       }
       return out;
     }
-
     function poolHistoryLines(pools, limit) {
       const list = (pools || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, limit || 10);
       const out = [];
@@ -1799,7 +1813,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           rec.verified = true;
           rec.text = mmdd + " · " + rec.n + " 只 · 次日开盘 " + v.up + "/" + v.n + " 上涨 · 开盘均 " +
             (v.avgPct >= 0 ? "+" : "") + v.avgPct.toFixed(2) + "%" +
-            (v.avgClosePct != null ? " · 收盘均 " + (v.avgClosePct >= 0 ? "+" : "") + v.avgClosePct.toFixed(2) + "%" : "");
+            (v.avgClosePct != null ? " · 收盘均 " + (v.avgClosePct >= 0 ? "+" : "") + v.avgClosePct.toFixed(2) + "%" : "") +
+            (v.avgMaxPct != null ? " · 最高均 " + (v.avgMaxPct >= 0 ? "+" : "") + v.avgMaxPct.toFixed(2) + "%" : "") +
+            (v.hitRateMax != null ? " · 最高上涨 " + v.upMax + "/" + v.nMax : "");
           rec.per = (v.rows || []).slice(0, 6).map((r) => r.name + (r.chgPct >= 0 ? " +" : " ") + r.chgPct.toFixed(1) + "%").join(" · ");
         } else {
           rec.text = mmdd + " · " + rec.n + " 只 · 待次日验证";
@@ -3076,7 +3092,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.47 · 2026-10-28";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.48 · 2026-10-28";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3293,12 +3309,17 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (verified.length) {
       var last = verified[verified.length - 1];
       var vCls = C.chgClass(last.verify.stats.avgPct);
-      html += '<div class="washsum unclear">次日验证（' + last.date + "）：" + last.verify.stats.up + "/" + last.verify.stats.n +
-        ' 上涨 · 平均 <span class="' + vCls + '">' + (last.verify.stats.avgPct >= 0 ? "+" : "") + last.verify.stats.avgPct.toFixed(2) + "%</span></div>";
+      var lv = last.verify.stats;
+      html += '<div class="washsum unclear">次日验证（' + last.date + "）：开盘 " + lv.up + "/" + lv.n +
+        ' 上涨 · 开盘均 <span class="' + vCls + '">' + (lv.avgPct >= 0 ? "+" : "") + lv.avgPct.toFixed(2) + "%</span>" +
+        (lv.avgMaxPct != null ? " · 最高均 " + (lv.avgMaxPct >= 0 ? "+" : "") + lv.avgMaxPct.toFixed(2) + "%" : "") + "</div>";
       var all = poolStatsAll();
       if (all && all.days > 1) {
-        html += '<div class="sigwhy">累计 ' + all.days + " 天：" + all.up + "/" + all.n + " 上涨 · 命中率 " + all.hitRate.toFixed(1) +
-          "% · 平均 " + (all.avg >= 0 ? "+" : "") + all.avg.toFixed(2) + "%</div>";
+        html += '<div class="sigwhy">累计 ' + all.days + " 天：" + all.n + " 只 · <b>开盘</b> " + all.up + "/" + all.n + " (" + all.hitRate.toFixed(0) +
+          "%) · <b>收盘</b> " + all.upClose + "/" + all.nClose + (all.hitRateClose != null ? " (" + all.hitRateClose.toFixed(0) + "%)" : "") +
+          " · <b>最高</b> " + all.upMax + "/" + all.nMax + (all.hitRateMax != null ? " (" + all.hitRateMax.toFixed(0) + "%)" : "") +
+          " · 开盘均 " + (all.avg >= 0 ? "+" : "") + all.avg.toFixed(2) + "%" +
+          (all.avgMax != null ? " / 最高均 " + (all.avgMax >= 0 ? "+" : "") + all.avgMax.toFixed(2) + "%" : "") + "</div>";
       }
     } else {
       html += '<div class="sigwhy">次日验证：次日打开时会自动用开盘价回填昨日名单涨跌，累计几天后看命中率。</div>';
@@ -4690,7 +4711,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   function verifyPools() {
     if (poolVerifyBusy) return;
     var today = todayKey();
-    var pend = (st.pools || []).filter(function (p) { return p.date < today && !p.verify; })
+    var pend = (st.pools || []).filter(function (p) {
+      return p.date < today && (!p.verify || !p.verify.stats || p.verify.stats.avgMaxPct == null);
+    })
       .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
     if (!pend.length) return;
     poolVerifyBusy = true;
@@ -4715,17 +4738,23 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     next();
   }
   function poolStatsAll() {
-    var all = { n: 0, up: 0, avg: 0, days: 0 };
+    var all = { n: 0, up: 0, upMax: 0, nMax: 0, upClose: 0, nClose: 0, avg: 0, avgMax: 0, maxN: 0, days: 0 };
     (st.pools || []).forEach(function (p) {
-      if (!p.verify || !p.verify.stats || !p.verify.stats.n) return;
+      var v = p.verify && p.verify.stats;
+      if (!v || !v.n) return;
       all.days++;
-      all.n += p.verify.stats.n;
-      all.up += p.verify.stats.up;
-      all.avg += p.verify.stats.avgPct * p.verify.stats.n;
+      all.n += v.n; all.up += v.up;
+      all.avg += v.avgPct * v.n;
+      all.upMax += v.upMax || 0; all.nMax += v.nMax || 0;
+      all.upClose += v.upClose || 0; all.nClose += v.nClose || 0;
+      if (v.avgMaxPct != null && v.nMax) { all.avgMax += v.avgMaxPct * v.nMax; all.maxN += v.nMax; }
     });
     if (!all.n) return null;
     all.avg /= all.n;
     all.hitRate = all.up / all.n * 100;
+    all.hitRateMax = all.nMax ? all.upMax / all.nMax * 100 : null;
+    all.hitRateClose = all.nClose ? all.upClose / all.nClose * 100 : null;
+    all.avgMax = all.maxN ? all.avgMax / all.maxN : null;
     return all;
   }
 

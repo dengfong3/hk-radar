@@ -714,14 +714,14 @@ const lists = {
   ]
 };
 const ranked = C.rankPoolCandidates(lists, { limit: 10 });
-ok("观察池：涨停被剔除、偏离目标过远也剔除", ranked.ok && ranked.picks.length === 3, ranked.picks.length);
+ok("观察池：防透支版只保留温和/健康票（涨停、接近上限、换手过热、净流出都被剔除）", ranked.ok && ranked.picks.length === 1, ranked.picks.map((p) => [p.code, p.score]));
 ok("观察池：按分数降序", ranked.picks.every((p, i, arr) => i === 0 || arr[i - 1].score >= p.score), ranked.picks.map((p) => p.score));
 const first = ranked.picks[0];
 ok("观察池：+5.0% 主板超上限被剔除，300502 排第一", first.code === "sz300502", first.code + " " + first.score);
 ok("观察池：超上限（主板≥5%）不进池", !ranked.picks.some((p) => p.code === "sh600487"), ranked.picks.map((p) => [p.code, p.chgPct]));
 ok("观察池：涨停股被直接剔除", !ranked.picks.some((p) => p.code === "sz301119"), ranked.picks.map((p) => p.code));
 ok("观察池：目标区间随板块（主板5/创业8）", ranked.picks.every((p) => p.targetBand === 5 || p.targetBand === 8), ranked.picks.map((p) => [p.code, p.targetBand]));
-ok("观察池：主力净流出带风险标注", ranked.picks.some((p) => p.code === "sh600825" && p.risks.some((r) => r.indexOf("净流出") >= 0)));
+ok("观察池：主力净流出被直接剔除", !ranked.picks.some((p) => p.code === "sh600825"));
 ok("观察池：空数据 → ok=false", C.rankPoolCandidates({}, {}).ok === false);
 ok("新浪榜单解析", (function () {
   const txt = JSON.stringify([{ symbol: "sz301119", code: "301119", name: "正强股份", trade: "34.310", changepercent: 20.01, high: "34.310", low: "26.860", turnoverratio: 6.47 },
@@ -741,12 +741,13 @@ const mkP = (code, name, chg, price, hi, lo, vr, to, flow, fp) => ({ code, name,
 const edge = C.rankPoolCandidates({
   up: [mkP("sh600001", "涨停股", 10.0, 20, 20, 18, 2, 5, 1e8, 8), mkP("sh600002", "跌停股", -10.0, 16, 18, 16, 2, 5, 1e8, 8),
        mkP("sh600004", "超上限", 5.1, 20, 20.5, 19, 2, 5, 1e8, 8)],
-  down: [mkP("sh600003", "回调股", -4.5, 19, 21, 18.5, 1.8, 4, 8e7, 7)]
+  down: [mkP("sh600003", "回调股", -3.5, 20.6, 21, 18.5, 1.8, 4, 8e7, 7)]
 }, { limit: 10 });
 ok("剔除：涨停/跌停/超上限都不进池", edge.picks.length === 1 && edge.picks[0].code === "sh600003", edge.picks.map((p) => p.code));
-ok("双创 +7.9% 在 8% 上限内可入选", (function () { const r = C.rankPoolCandidates({ up: [mkP("sz300001", "双创内", 7.9, 20, 20.2, 18, 2, 5, 9e7, 8)] }, { limit: 5 }); return r.picks.length === 1 && r.picks[0].capPct === 8; })());
-ok("双创 +8.1% 超上限被剔除", C.rankPoolCandidates({ up: [mkP("sz300002", "双创超", 8.1, 20, 20.2, 18, 2, 5, 9e7, 8)] }, { limit: 5 }).picks.length === 0);
-ok("跌幅 -4.5%：标记为回调型", edge.picks[0].dir === "down" && edge.picks[0].reasons.some((r) => r.indexOf("回调型") >= 0), edge.picks[0].reasons);
+ok("双创 +6.5% 温和上涨可入选", (function () { const r = C.rankPoolCandidates({ up: [mkP("sz300001", "双创内", 6.5, 20, 20.2, 18, 1.5, 4, 9e7, 8)] }, { limit: 5 }); return r.picks.length === 1 && r.picks[0].capPct === 8; })());
+ok("双创 +7.9% 接近上限（≥90%）被剔除", C.rankPoolCandidates({ up: [mkP("sz300002", "双创超", 7.9, 20, 20.2, 18, 2, 5, 9e7, 8)] }, { limit: 5 }).picks.length === 0);
+ok("双创 +8.1% 超上限被剔除", C.rankPoolCandidates({ up: [mkP("sz300003", "双创超2", 8.1, 20, 20.2, 18, 2, 5, 9e7, 8)] }, { limit: 5 }).picks.length === 0);
+ok("跌幅 -3.5%：标记为回调型", edge.picks[0].dir === "down" && edge.picks[0].reasons.some((r) => r.indexOf("回调型") >= 0), edge.picks[0].reasons);
 
 const batch = 'v_sh600487="1~\u8d44\u91d1\u738b~600487~22.00~21.00~21.50~1.0~0~0~21.99~100~21.98~100~0~0~0~0~0~0~22.01~100~22.02~100~0~0~0~0~0~0~20261019150000~1.00~5.00~22.20~20.50~22.00/1/2~1~2~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0";\nv_sz300502="1~\u8d44\u91d1\u6b21~300502~94.00~95.00~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0";';
 const quotes = C.parseBatchSnapshot(batch);
@@ -1420,6 +1421,21 @@ ok("页面验证改用日线口径", html.includes("poolVerifyStats") && html.in
 console.log("\n[C级说明]");
 ok("页面解释 C 级无方向原因", html.includes("C 级（无方向）") && html.includes("避免给出没有依据的点位"));
 ok("页面给出等级门槛（A≥75 / B≥62 / C<62）", html.includes("A ≥75") && html.includes("B 62–74") && html.includes("C &lt;62"));
+
+
+/* ---------- 48) 观察池防透支 + 三口径验证 ---------- */
+console.log("\n[观察池防透支与三口径]");
+const pv2Picks = [{ code: "sh601166", name: "兴业银行", price: 20 }];
+const pv2Bars = { "sh601166": [{ date: "2026-10-23", o: 19.8, c: 20.0 }, { date: "2026-10-27", o: 20.1, c: 20.2, h: 21.0, l: 19.9 }] };
+const pv2 = C.poolVerifyStats(pv2Picks, pv2Bars, "2026-10-24");
+ok("次日最高口径：h=21 → +5%", Math.abs(pv2.rows[0].maxPct - 5) < 1e-9, pv2.rows[0]);
+ok("三口径计数（开盘/收盘/最高都算上涨）", pv2.up === 1 && pv2.upClose === 1 && pv2.upMax === 1 && pv2.nMax === 1, pv2);
+ok("三口径命中率都为 100%", pv2.hitRate === 100 && pv2.hitRateClose === 100 && pv2.hitRateMax === 100, [pv2.hitRate, pv2.hitRateClose, pv2.hitRateMax]);
+ok("页面累计行显示开盘/收盘/最高三口径", html.includes("<b>最高</b>") && html.includes("最高均"));
+ok("页面含旧记录自动重验逻辑", html.includes("avgMaxPct == null"));
+ok("防透支：+4.6% 接近主板上限被剔除", C.rankPoolCandidates({ up: [{ code: "sh600001", name: "x", price: 20, chgPct: 4.6, high: 20.2, low: 18.5, volRatio: 1.5, turnover: 4, flowAmt: 1e8, flowPct: 8 }] }, { limit: 5 }).picks.length === 0);
+ok("防透支：主力净流出被剔除", C.rankPoolCandidates({ up: [{ code: "sh600002", name: "y", price: 20, chgPct: 2.0, high: 20.2, low: 18.5, volRatio: 1.5, turnover: 4, flowAmt: -1e8, flowPct: -3 }] }, { limit: 5 }).picks.length === 0);
+ok("防透支：换手 20% 被剔除", C.rankPoolCandidates({ up: [{ code: "sh600003", name: "z", price: 20, chgPct: 2.0, high: 20.2, low: 18.5, volRatio: 1.5, turnover: 20, flowAmt: 1e8, flowPct: 8 }] }, { limit: 5 }).picks.length === 0);
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
