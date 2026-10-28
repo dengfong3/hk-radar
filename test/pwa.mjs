@@ -246,7 +246,7 @@ ok("secid 映射：港股/沪/深/北/美股",
   C.eastmoneySecid("hk06166") === "116.06166" && C.eastmoneySecid("sh603083") === "1.603083" &&
   C.eastmoneySecid("sz000001") === "0.000001" && C.eastmoneySecid("bj835185") === "0.835185" &&
   C.eastmoneySecid("usAAPL") === null);
-ok("每手股数：港股 50 / A股 100", C.lotOf("hk06166") === 50 && C.lotOf("sh603083") === 100);
+ok("每手股数：港股 50 / A股 100 / 科创板 200", C.lotOf("hk06166") === 50 && C.lotOf("sh603083") === 100 && C.lotOf("sh688783") === 200);
 
 // 东财报文（真实格式裁剪：时间,开,收,高,低,分钟量,分钟额,均价）
 const EM = { data: { code: "603083", name: "剑桥科技", preClose: 167.2, trends: [
