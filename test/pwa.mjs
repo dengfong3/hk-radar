@@ -1437,5 +1437,31 @@ ok("防透支：+4.6% 接近主板上限被剔除", C.rankPoolCandidates({ up: [
 ok("防透支：主力净流出被剔除", C.rankPoolCandidates({ up: [{ code: "sh600002", name: "y", price: 20, chgPct: 2.0, high: 20.2, low: 18.5, volRatio: 1.5, turnover: 4, flowAmt: -1e8, flowPct: -3 }] }, { limit: 5 }).picks.length === 0);
 ok("防透支：换手 20% 被剔除", C.rankPoolCandidates({ up: [{ code: "sh600003", name: "z", price: 20, chgPct: 2.0, high: 20.2, low: 18.5, volRatio: 1.5, turnover: 20, flowAmt: 1e8, flowPct: 8 }] }, { limit: 5 }).picks.length === 0);
 
+
+/* ---------- 49) 昨日观察池：一直显示 + 盘中跟踪 ---------- */
+console.log("\n[昨日观察池跟踪]");
+ok("页面含昨日观察池跟踪", html.includes("昨日观察池") && html.includes("今日盘中"));
+const yKey = (function () {
+  const d = new Date(); d.setDate(d.getDate() - 1);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+})();
+const yesterdayPool = { date: yKey, genAt: Date.now() - 86400000, listsOk: 5, listsTotal: 5,
+  picks: [
+    { code: "sh600584", name: "长电科技", price: 20.44, chgPct: 3.98, posInDay: 0.86, volRatio: 1.5, turnover: 3.8, flowAmt: 4.63e8, score: 16 },
+    { code: "sh601869", name: "长飞光纤", price: 30.1, chgPct: 3.74, posInDay: 0.88, volRatio: 1.4, turnover: 2.4, flowAmt: 3.2e8, score: 15 }
+  ] };
+const hPrev = makeHarness(
+  { code: "sh600418", watch: ["sh600418"], sound: false, chartMode: "min", pos: {}, plans: {}, trade: {}, lastFired: {},
+    ledger: { records: [] }, pools: [yesterdayPool] },
+  () => null, { snapshotOnly: false });
+let threwPrev = null;
+try { hPrev.run(coreSrc); hPrev.run(uiSrc); } catch (e) { threwPrev = e; }
+ok("昨日池场景无异常", !threwPrev, threwPrev && threwPrev.message);
+await new Promise((r) => setTimeout(r, 300));
+const prevTxt = hPrev.deep("poolBox");
+ok("今日未生成时仍显示昨日池", prevTxt.indexOf("昨日观察池") >= 0, prevTxt.slice(0, 200));
+ok("昨日池显示名单与昨收价", prevTxt.indexOf("长电科技") >= 0 && prevTxt.indexOf("20.44") >= 0, prevTxt.slice(0, 300));
+ok("昨日池显示两只股票", prevTxt.indexOf("长飞光纤") >= 0, prevTxt.slice(0, 400));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

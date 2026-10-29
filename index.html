@@ -3092,7 +3092,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.48 · 2026-10-28";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.49 · 2026-10-29";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3304,6 +3304,37 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       });
       html += '<div><button class="ledclear" id="btnPoolRefresh">重新生成</button></div>';
     }
+    // 昨日观察池：一直显示 + 盘中实时跟踪（基准=昨日收盘价）
+    var prev = null;
+    (st.pools || []).forEach(function (p) { if (p.date < today && (!prev || p.date > prev.date)) prev = p; });
+    if (prev && prev.picks && prev.picks.length) {
+      var prRows = C.attachPoolLive(prev.picks, poolLive);
+      var pUp = 0, pSum = 0, pN = 0, pBest = null, pWorst = null, prHtml = "";
+      prRows.forEach(function (p, idx) {
+        var base = p.price;
+        var chg = (p.livePrice != null && base > 0) ? (p.livePrice / base - 1) * 100 : null;
+        if (chg != null) {
+          pN++; pSum += chg;
+          if (chg > 0.05) pUp++;
+          if (pBest == null || chg > pBest) pBest = chg;
+          if (pWorst == null || chg < pWorst) pWorst = chg;
+        }
+        prHtml += '<div class="washrow"><span class="lw">' + (idx + 1) + ". " + p.name + "</span><span>" + p.code +
+          " · 昨收 " + (base == null ? "--" : base.toFixed(2)) +
+          (p.livePrice != null ? " → 现价 " + p.livePrice.toFixed(2) : "") +
+          (chg != null ? ' <span class="' + C.chgClass(chg) + '">' + (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%</span>" : ' · <span class="cFlat">等待盘中行情</span>') +
+          "</span></div>";
+      });
+      var pSumTxt = pN
+        ? ("上涨 " + pUp + "/" + pN + " · 平均 " + (pSum / pN >= 0 ? "+" : "") + (pSum / pN).toFixed(2) + "%" +
+          (pBest != null ? " · 最强 " + (pBest >= 0 ? "+" : "") + pBest.toFixed(2) + "%" : "") +
+          (pWorst != null ? " · 最弱 " + (pWorst >= 0 ? "+" : "") + pWorst.toFixed(2) + "%" : ""))
+        : "等待盘中行情…";
+      html += '<div class="sigwhy" style="margin-top:8px"><b>昨日观察池（' + prev.date + '）· 今日盘中</b> · ' + pSumTxt + "</div>";
+      html += prHtml;
+      html += '<div class="sigwhy" style="font-size:10px">基准=昨日收盘价（' + prev.date + ' 池子生成价）；看的是昨日名单在今天的变化，不是买卖建议。</div>';
+    }
+
     // 次日验证
     var verified = pools.filter(function (p) { return p.verify && p.verify.stats && p.verify.stats.n; });
     if (verified.length) {
@@ -4557,9 +4588,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   var RANK_FIELDS = "f2,f3,f5,f6,f8,f10,f12,f13,f14,f15,f16,f17,f18,f23,f62,f100,f184";
   var RANK_HOSTS = ["push2.eastmoney.com", "push2delay.eastmoney.com", "82.push2.eastmoney.com"];
   var rankHost = null;
-  function fetchPoolLive(picks) {
-    if (!picks || !picks.length) return;
-    var codes = picks.map(function (p) { return p.code; }).join(",");
+  function fetchPoolLive(picksOrCodes) {
+    if (!picksOrCodes || !picksOrCodes.length) return;
+    var codes = picksOrCodes.map(function (x) { return typeof x === "string" ? x : x.code; }).filter(Boolean).join(",");
+    if (!codes) return;
     fetch("https://qt.gtimg.cn/q=" + codes, { cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
       .then(function (buf) {
@@ -4596,6 +4628,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   }
   function todayKey() {
     var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function dayKeyOffset(n) {
+    var d = new Date();
+    d.setDate(d.getDate() + (n || 0));
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
   function rankOnce(fid, pz, po) {
@@ -4785,11 +4822,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         // 观察池实时涨跌：15 秒一次批量快照
         try {
           var tkPool = todayKey();
-          var curPool = null;
-          (st.pools || []).forEach(function (p) { if (p.date === tkPool) curPool = p; });
-          if (curPool && curPool.picks && curPool.picks.length && Date.now() - poolLiveAt > 15000) {
-            fetchPoolLive(curPool.picks);
-          }
+          var curPool = null, prevPool = null;
+          (st.pools || []).forEach(function (p) {
+            if (p.date === tkPool) curPool = p;
+            else if (p.date < tkPool && (!prevPool || p.date > prevPool.date)) prevPool = p;
+          });
+          var needCodes = [];
+          if (curPool) curPool.picks.forEach(function (x) { if (needCodes.indexOf(x.code) < 0) needCodes.push(x.code); });
+          if (prevPool) prevPool.picks.forEach(function (x) { if (needCodes.indexOf(x.code) < 0) needCodes.push(x.code); });
+          if (needCodes.length && Date.now() - poolLiveAt > 15000) fetchPoolLive(needCodes);
         } catch (e) {}
         // 14:50 尾盘观察池：窗口内每 3 分钟自动刷新；错过窗口则收盘后自动补生成一次
         if (C.marketOf(st.code) === "cn") {
