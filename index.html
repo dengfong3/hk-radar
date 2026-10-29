@@ -3092,7 +3092,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.49 · 2026-10-29";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.50 · 2026-10-29";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3596,6 +3596,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           hhmm: b.at, kind: b.kind, entry: b.entry, stop: b.stop, target: b.target, rr: b.rr, side: isSell ? "sell" : "buy" });
         if (st.burstLog.length > 30) st.burstLog = st.burstLog.slice(-30);
         save({ burstLog: st.burstLog });
+        // 买卖点弹窗：敏捷信号触发时提示（10 分钟内同类只弹一次）
+        try {
+          alertOnce("burst:" + st.code + ":" + (isSell ? "sell" : "buy") + ":" + b.kind + ":" + b.at,
+            isSell ? "sell" : "buy",
+            (isSell ? "敏捷卖点：" : "敏捷买点：") + b.kind + " · " + (isSell ? "卖出 " : "入场 ") + b.entry +
+            " · " + (isSell ? "回升失效 " : "止损 ") + b.stop + " · 目标 " + b.target +
+            " · RR " + (b.rr == null ? "--" : b.rr.toFixed(2)) + (b.holding ? "" : "（空仓观察）"),
+            metrics ? metrics.price : null, 10 * 60 * 1000);
+        } catch (e) { /* 忽略 */ }
         try {
           if (typeof notify === "function") notify({ id: "burst-" + st.code, level: isSell ? "warn" : "buy",
             text: isSell ? ("减仓警告 " + b.kind + " " + C.displayCode(st.code) + " 卖出 " + b.entry + " 回补/失效 " + b.stop)
@@ -3664,6 +3673,19 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     html += '<div class="tradebar"><button class="ledclear" id="btnEntryPlan">填入建仓计划</button>' +
       '<button class="ledclear" id="btnEntryTrack">记录到验证清单</button></div>';
     box.innerHTML = html;
+    // 买卖点弹窗：建仓建议变为"可以建仓/小仓试"时提示（60 分钟内同区间只弹一次）
+    try {
+      if (ea.suitable === "yes" || ea.suitable === "small") {
+        var _z0 = ea.zones && ea.zones[0];
+        alertOnce("entry:" + st.code + ":" + ea.suitable + ":" + (_z0 ? Math.round(_z0.lo * 100) + "-" + Math.round(_z0.hi * 100) : "--"),
+          ea.suitable === "yes" ? "buy" : "info",
+          "建仓建议（" + (ea.suitable === "yes" ? "可以建仓" : "小仓试") + "）：区间 " +
+          (_z0 ? _z0.lo.toFixed(2) + "–" + _z0.hi.toFixed(2) : "--") +
+          (ea.stop != null ? " · 止损 " + ea.stop : "") + (ea.target != null ? " · 目标 " + ea.target : "") +
+          " · 仓位上限 " + (ea.maxShares || 0) + " 股",
+          metrics ? metrics.price : null, 60 * 60 * 1000);
+      }
+    } catch (e) { /* 忽略 */ }
     if (meta) meta.textContent = ea.suitable === "yes" ? "可以建仓" : ea.suitable === "small" ? "小仓试" : "不建议建仓";
     var bt = $("btnEntryTrack");
     if (bt) bt.addEventListener("click", function () {
@@ -3791,6 +3813,20 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       capital: curCapital()
     });
     lastSetup = sp;
+    // 买卖点弹窗：A/B 级且方向明确时提示（30 分钟内同信号只弹一次）
+    try {
+      if ((sp.grade === "A" || sp.grade === "B") && (sp.side === "long" || sp.side === "reduce")) {
+        var _d = sp.side === "long" ? "买点" : "减仓/卖点";
+        var _zone = sp.entry ? (sp.entry.lo.toFixed(2) + "–" + sp.entry.hi.toFixed(2)) : ("现价 " + (metrics ? metrics.price : "--"));
+        alertOnce("smart:" + st.code + ":" + sp.side + ":" + sp.grade,
+          sp.side === "long" ? "buy" : "sell",
+          "智能信号 " + sp.grade + " 级 · " + _d + "：" + _zone +
+          (sp.stop != null ? " · 止损 " + sp.stop.toFixed(2) : "") +
+          (sp.target != null ? " · 目标 " + sp.target.toFixed(2) : "") +
+          (sp.rr != null ? " · RR " + sp.rr : "") + "（规则信号，非预测，T+1）",
+          metrics ? metrics.price : null, 30 * 60 * 1000);
+      }
+    } catch (e) { /* 忽略 */ }
     lastWash = C.washoutDetect(metrics, points, mpData, ctx3Data, st.code, {});
     renderWashCard(lastWash);
     renderMacroCard();
@@ -3958,6 +3994,18 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (st.sound && now >= muteUntil) { beep(sig.level); vibrate(sig.level); notify(sig); }
     renderAlert();
   }
+  var lastSignalAlertAt = {};
+  /** 买卖点弹窗：同一信号在冷却期内只弹一次（智能信号/敏捷信号/建仓建议共用） */
+  function alertOnce(id, level, text, price, cooldownMs) {
+    try {
+      var now = Date.now();
+      var cd = cooldownMs || 30 * 60 * 1000;
+      if (lastSignalAlertAt[id] && now - lastSignalAlertAt[id] < cd) return;
+      lastSignalAlertAt[id] = now;
+      fire({ id: "sig:" + id, level: level, text: text }, price);
+    } catch (e) { /* 弹窗失败不影响主流程 */ }
+  }
+
 
   /* ---------- 计划 / 自选 ---------- */
   function planFromForm() {

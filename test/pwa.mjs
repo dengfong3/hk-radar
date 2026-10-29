@@ -1463,5 +1463,15 @@ ok("今日未生成时仍显示昨日池", prevTxt.indexOf("昨日观察池") >=
 ok("昨日池显示名单与昨收价", prevTxt.indexOf("长电科技") >= 0 && prevTxt.indexOf("20.44") >= 0, prevTxt.slice(0, 300));
 ok("昨日池显示两只股票", prevTxt.indexOf("长飞光纤") >= 0, prevTxt.slice(0, 400));
 
+
+/* ---------- 50) 买卖点弹窗（智能信号/敏捷信号/建仓建议） ---------- */
+console.log("\n[买卖点弹窗]");
+ok("三个卡片都接入弹窗", (html.match(/alertOnce\(/g) || []).length >= 4, (html.match(/alertOnce\(/g) || []).length);
+ok("复用提醒队列 buy/sell 等级", html.includes('buy: "买入点"') && html.includes('sell: "卖出点"'));
+ok("弹窗冷却逻辑存在", html.includes("lastSignalAlertAt"));
+ok("智能信号弹窗文案", html.includes("智能信号 ") && html.includes("减仓/卖点"));
+ok("敏捷信号弹窗文案", html.includes("敏捷买点：") && html.includes("敏捷卖点："));
+ok("建仓建议弹窗文案", html.includes("建仓建议（"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
