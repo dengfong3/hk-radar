@@ -1473,5 +1473,22 @@ ok("智能信号弹窗文案", html.includes("智能信号 ") && html.includes("
 ok("敏捷信号弹窗文案", html.includes("敏捷买点：") && html.includes("敏捷卖点："));
 ok("建仓建议弹窗文案", html.includes("建仓建议（"));
 
+
+/* ---------- 51) 多股监控（自选实时） ---------- */
+console.log("\n[多股监控]");
+ok("页面含多股监控卡片", html.includes("多股监控（自选实时）") && html.includes("data-code"));
+const hMulti = makeHarness({
+  code: "sh603083", watch: ["sh603083", "sz300308", "hk06166"], sound: false, chartMode: "min",
+  names: { sh603083: "剑桥科技", sz300308: "中际旭创", hk06166: "腾讯控股" },
+  pos: {}, plans: {}, trade: {}, lastFired: {}
+}, () => null, { snapshotOnly: false });
+let threwMulti = null;
+try { hMulti.run(coreSrc); hMulti.run(uiSrc); } catch (e) { threwMulti = e; }
+ok("多股监控场景无异常", !threwMulti, threwMulti && threwMulti.message);
+await new Promise((r) => setTimeout(r, 300));
+const multiTxt = hMulti.deep("multiBox");
+ok("多股监控显示自选名称", multiTxt.indexOf("中际旭创") >= 0 && multiTxt.indexOf("腾讯控股") >= 0, multiTxt.slice(0, 200));
+ok("多股监控显示代码与涨跌占位", multiTxt.indexOf("300308") >= 0 && multiTxt.indexOf("--") >= 0, multiTxt.slice(0, 240));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -217,6 +217,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="card-title"><b>自选</b></div>
   <div class="chips" id="chips"></div>
 </div>
+<div class="card" id="multiCard" style="display:none">
+  <div class="card-title"><b>多股监控（自选实时）</b><span class="sp"></span><span id="multiMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="multiBox"></div>
+</div>
 
 <div class="card">
   <div class="head">
@@ -3092,7 +3096,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.50 · 2026-10-29";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.51 · 2026-10-29";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4092,6 +4096,43 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       .catch(function () { /* 名称拉取失败不影响主功能 */ });
   }
 
+  function fetchMultiLive() {
+    var codes = (st.watch || []).filter(Boolean).slice(0, 10);
+    if (codes.length < 2) return;
+    fetch("https://qt.gtimg.cn/q=" + codes.join(","), { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
+      .then(function (buf) {
+        multiLive = C.parseBatchSnapshot(C.decodeText(buf, "gbk"));
+        multiLiveAt = Date.now();
+        renderMultiCard();
+      })
+      .catch(function () { /* 多股行情失败不影响主功能 */ });
+  }
+  function renderMultiCard() {
+    var card = $("multiCard"), box = $("multiBox"), meta = $("multiMeta");
+    if (!card || !box) return;
+    var codes = (st.watch || []).slice(0, 10);
+    card.style.display = codes.length > 1 ? "" : "none";
+    if (codes.length < 2) return;
+    var html = "";
+    codes.forEach(function (code) {
+      var q = multiLive[code];
+      var nm = st.names[code] || "";
+      var chg = q && q.chgPct != null ? q.chgPct : null;
+      var px = q && q.price != null ? q.price : null;
+      var cls = chg == null ? "cFlat" : C.chgClass(chg);
+      html += '<div class="washrow" data-code="' + code + '" style="cursor:pointer' + (code === st.code ? ";color:#bae6fd" : "") + '"><span class="lw">' +
+        (code === st.code ? "● " : "") + (nm || C.displayCode(code)) + "</span><span>" + C.displayCode(code) +
+        " · " + (px == null ? "--" : px.toFixed(2)) + ' · <span class="' + cls + '">' +
+        (chg == null ? "--" : (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%") + "</span></span></div>";
+    });
+    box.innerHTML = html;
+    Array.prototype.forEach.call(box.querySelectorAll("[data-code]"), function (row) {
+      row.addEventListener("click", function () { switchTo(row.getAttribute("data-code")); });
+    });
+    if (meta) meta.textContent = multiLiveAt ? ("每 15 秒更新 · " + new Date(multiLiveAt).toTimeString().slice(0, 8)) : "等待行情";
+  }
+
   function renderChips() {
     var box = $("chips");
     $("watchCard").style.display = st.watch.length > 1 ? "" : "none";
@@ -4131,6 +4172,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       }
       box.appendChild(chip);
     });
+    try { renderMultiCard(); } catch (e) { /* 忽略 */ }
   }
 
   /* ---------- 图表 ---------- */
@@ -4508,6 +4550,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   var poolBuilding = false, poolAutoDate = "", poolRetryCount = 0, poolAutoCount = 0, poolAutoDay = "";
   var lastEntryAdvice = null, lastTrackVerify = 0, lastNamesFetch = 0;
   var poolLive = {}, poolLiveAt = 0, poolLiveKey = "";
+  var multiLive = {}, multiLiveAt = 0;
   var failStreak = 0;
   function allPointsNow() {
     return mergePoints(historyPoints, parsed ? parsed.points : []);
@@ -4912,6 +4955,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
         try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
         try {
+          if (st.watch.length > 1 && Date.now() - multiLiveAt > 15000) fetchMultiLive();
+        } catch (e) {}
+        try {
           var missingName = (st.watch || []).some(function (c) { return !st.names[c]; });
           if (missingName && Date.now() - lastNamesFetch > 300000) { lastNamesFetch = Date.now(); fetchWatchNames(); }
         } catch (e) {}
@@ -5181,6 +5227,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   $("codeInput").value = C.displayCode(st.code);
   renderChips(); renderPlanSummary(); bindPosInputs();
   try { fetchWatchNames(); } catch (e) {}
+  try { renderMultiCard(); fetchMultiLive(); } catch (e) {}
   try { renderLocalCard(); } catch (e) {}
   try { renderBurstCard(); } catch (e) {}
   try { renderEntryCard(); } catch (e) {}
