@@ -210,7 +210,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
 <div class="card codebar">
   <input id="codeInput" inputmode="text" autocomplete="off" autocapitalize="characters"
-         placeholder="代码：06166 / 600519 / AAPL" aria-label="股票代码">
+         placeholder="代码 / 名称 / 拼音首字母（如 宁德时代、ndsd）" aria-label="股票代码">
   <button id="btnSwitch">切换</button>
 </div>
 <div class="card" id="watchCard" style="display:none">
@@ -1941,6 +1941,36 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       return out.filter((x) => x > 0).sort((a, b) => Math.abs(a - price) - Math.abs(b - price)).slice(0, n || 4);
     }
 
+
+    /** 解析腾讯 smartbox 智能选股返回：v_hint="sz~300750~宁德时代~ndsd~GP-A^hk~03750~..." */
+    function parseSmartbox(raw) {
+      const txt = String(raw == null ? "" : raw);
+      const m = /v_hint\s*=\s*"([^"]*)"/.exec(txt) || /"([^"]*)"/.exec(txt);
+      const body = m ? m[1] : txt;
+      const out = [];
+      for (const item of String(body || "").split("^")) {
+        const f = String(item || "").split("~");
+        if (f.length < 4) continue;
+        const market = String(f[0] || "").toLowerCase();
+        const num = String(f[1] || "");
+        const name = String(f[2] || "").replace(/\uFFFD/g, "");
+        const pinyin = String(f[3] || "").toLowerCase();
+        if (!/^(sh|sz|bj|hk|us)$/.test(market) || !num || !name) continue;
+        out.push({ code: market + num, name: name, pinyin: pinyin, type: String(f[4] || "") });
+      }
+      return out;
+    }
+    /** 从 smartbox 结果挑一条：A 股优先；名称/拼音完全匹配优先；否则取第一条 */
+    function pickSmartboxHit(list, query) {
+      const arr = list || [];
+      if (!arr.length) return null;
+      const q = String(query == null ? "" : query).trim().toLowerCase();
+      const aShare = arr.filter((x) => /^(sh|sz|bj)/.test(x.code));
+      const pool = aShare.length ? aShare : arr;
+      const exact = pool.filter((x) => x.name === String(query || "").trim() || x.pinyin === q);
+      return exact.length ? exact[0] : pool[0];
+    }
+
     /**
      * 生成每日简报（规则化，不是预测）。
      * kind: "preopen"（开盘前策略）/ "midday"（上午分析+下午策略）/ "postclose"（盘后总结+明日策略）
@@ -3080,6 +3110,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     chgClass: chgClass,
     fmtLocalTime: fmtLocalTime,
     fmtHhmm: fmtHhmm,
+    parseSmartbox: parseSmartbox,
+    pickSmartboxHit: pickSmartboxHit,
     parseSinaRank: parseSinaRank,
     quoteUrls: quoteUrls, TENCENT_MINUTE: TENCENT_MINUTE, EASTMONEY_TRENDS: EASTMONEY_TRENDS,
     bumpSrcHealth: bumpSrcHealth, srcHealthText: srcHealthText, fmtDown: fmtDown, todayStr: todayStr,
@@ -3096,7 +3128,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.51 · 2026-10-29";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.52 · 2026-11-02";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -5006,6 +5038,71 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       });
   }
 
+  var smartCache = {};
+  /** 名称/拼音首字母 → 代码（先查本地自选名称，再走腾讯 smartbox JSONP，避免 CORS） */
+  function fetchSmartbox(q) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.charset = "utf-8";
+      s.src = "https://smartbox.gtimg.cn/s3/?q=" + encodeURIComponent(q) + "&t=all";
+      var done = false;
+      function finish(err) {
+        if (done) return;
+        done = true;
+        try { s.remove(); } catch (e) {}
+        if (err) reject(err);
+        else resolve(window.v_hint || "");
+      }
+      s.onload = function () { finish(null); };
+      s.onerror = function () { finish(new Error("smartbox 不可用")); };
+      setTimeout(function () { finish(new Error("smartbox 超时")); }, 6000);
+      document.head.appendChild(s);
+    });
+  }
+  function resolveCodeByText(raw) {
+    var txt = String(raw == null ? "" : raw).trim();
+    if (!txt) return Promise.resolve(null);
+    var key = txt.toLowerCase();
+    if (smartCache[key]) return Promise.resolve(smartCache[key]);
+    // 1) 本地自选名称（含模糊匹配）
+    var codes = Object.keys(st.names || {});
+    for (var i = 0; i < codes.length; i++) {
+      var nm = String(st.names[codes[i]] || "");
+      if (nm && nm.indexOf(txt) >= 0) {
+        smartCache[key] = { code: codes[i], name: nm };
+        return Promise.resolve(smartCache[key]);
+      }
+    }
+    // 2) 腾讯 smartbox（中文全名 / 拼音首字母都支持）
+    return fetchSmartbox(txt).then(function (body) {
+      var hit = C.pickSmartboxHit(C.parseSmartbox(body), txt);
+      if (!hit) return null;
+      smartCache[key] = hit;
+      return hit;
+    });
+  }
+  /** 输入框统一入口：代码 / 中文名 / 拼音首字母（如 ndsd、zxkc） */
+  function switchByInput(raw) {
+    var txt = String(raw == null ? "" : raw).trim();
+    if (!txt) return;
+    var code = C.normalizeCode(txt);
+    if (code) { switchTo(code); return; }
+    $("codeInput").value = "查找中…";
+    resolveCodeByText(txt).then(function (hit) {
+      if (!hit) {
+        $("codeInput").value = "找不到：" + txt;
+        setTimeout(function () { $("codeInput").value = C.displayCode(st.code); }, 1600);
+        return;
+      }
+      if (hit.name && !st.names[hit.code]) { st.names[hit.code] = hit.name; save({ names: st.names }); }
+      $("codeInput").value = C.displayCode(hit.code);
+      switchTo(hit.code);
+    }).catch(function () {
+      $("codeInput").value = "查找失败，请输代码";
+      setTimeout(function () { $("codeInput").value = C.displayCode(st.code); }, 1600);
+    });
+  }
+
   function switchTo(raw) {
     var code = C.normalizeCode(raw);
     if (!code) { $("codeInput").value = "代码无法识别"; setTimeout(function () { $("codeInput").value = C.displayCode(st.code); }, 1200); return; }
@@ -5070,8 +5167,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     $("btnEvent").textContent = st.eventRisk ? "⛔" : "⚠";
     if (metrics) render(metrics, parsed ? parsed.points : []);
   });
-  $("btnSwitch").addEventListener("click", function () { switchTo($("codeInput").value); });
-  $("codeInput").addEventListener("keydown", function (e) { if (e && e.key === "Enter") switchTo($("codeInput").value); });
+  $("btnSwitch").addEventListener("click", function () { switchByInput($("codeInput").value); });
+  $("codeInput").addEventListener("keydown", function (e) { if (e && e.key === "Enter") switchByInput($("codeInput").value); });
   function setChartMode(mode) {
     st.chartMode = mode; save({ chartMode: mode });
     [["tabMin", "min"], ["tabM5", "5"], ["tabM15", "15"], ["tabM30", "30"], ["tabM60", "60"]].forEach(function (pair) {

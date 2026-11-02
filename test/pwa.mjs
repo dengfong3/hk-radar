@@ -1490,5 +1490,16 @@ const multiTxt = hMulti.deep("multiBox");
 ok("多股监控显示自选名称", multiTxt.indexOf("中际旭创") >= 0 && multiTxt.indexOf("腾讯控股") >= 0, multiTxt.slice(0, 200));
 ok("多股监控显示代码与涨跌占位", multiTxt.indexOf("300308") >= 0 && multiTxt.indexOf("--") >= 0, multiTxt.slice(0, 240));
 
+
+/* ---------- 52) 支持中文名/拼音首字母切换 ---------- */
+console.log("\n[中文名/拼音切换]");
+const sb = C.parseSmartbox('v_hint="sz~300750~\u5b81\u5fb7\u65f6\u4ee3~ndsd~GP-A^hk~03750~\u5b81\u5fb7\u65f6\u4ee3~ndsd~GP"');
+ok("smartbox 解析出 2 条", sb.length === 2 && sb[0].code === "sz300750" && sb[1].code === "hk03750", sb);
+ok("smartbox 解析名称与拼音", sb[0].name === "宁德时代" && sb[0].pinyin === "ndsd", sb[0]);
+ok("优先选 A 股", C.pickSmartboxHit(sb, "宁德时代").code === "sz300750", C.pickSmartboxHit(sb, "宁德时代"));
+ok("拼音完全匹配优先", C.pickSmartboxHit([{ code: "sz000001", name: "平安银行", pinyin: "payh" }, { code: "sz002594", name: "比亚迪", pinyin: "byd" }], "byd").code === "sz002594");
+ok("空结果返回 null", C.pickSmartboxHit([], "x") === null);
+ok("页面接入名称/拼音搜索", html.includes("switchByInput") && html.includes("smartbox.gtimg.cn"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
