@@ -1501,5 +1501,29 @@ ok("拼音完全匹配优先", C.pickSmartboxHit([{ code: "sz000001", name: "平
 ok("空结果返回 null", C.pickSmartboxHit([], "x") === null);
 ok("页面接入名称/拼音搜索", html.includes("switchByInput") && html.includes("smartbox.gtimg.cn"));
 
+
+/* ---------- 53) 本金默认值不再当成真实资金显示 ---------- */
+console.log("\n[本金显示]");
+ok("默认本金不直接显示为真实资金", html.includes("本金未设") && html.includes("仅影响股数"));
+ok("提示可填写可用资金", html.includes("可在「持仓」卡填写你的可用资金"));
+const hCap = makeHarness({
+  code: "sh603083", watch: ["sh603083"], sound: false, chartMode: "min",
+  pos: {}, plans: {}, trade: {}, lastFired: {}, capital: {}
+}, () => aSharePayload());
+let threwCap = null;
+try { hCap.run(coreSrc); hCap.run(uiSrc); } catch (e) { threwCap = e; }
+ok("未设本金场景无异常", !threwCap, threwCap && threwCap.message);
+await new Promise((r) => setTimeout(r, 300));
+ok("未设本金时建仓卡显示『本金未设』", hCap.deep("entryBox").indexOf("本金未设") >= 0, hCap.deep("entryBox").slice(0, 300));
+const hCap2 = makeHarness({
+  code: "sh603083", watch: ["sh603083"], sound: false, chartMode: "min",
+  pos: {}, plans: {}, trade: {}, lastFired: {}, capital: { sh603083: 50000 }
+}, () => aSharePayload());
+let threwCap2 = null;
+try { hCap2.run(coreSrc); hCap2.run(uiSrc); } catch (e) { threwCap2 = e; }
+ok("已设本金场景无异常", !threwCap2, threwCap2 && threwCap2.message);
+await new Promise((r) => setTimeout(r, 300));
+ok("已设本金时显示『你设置』", hCap2.deep("entryBox").indexOf("你设置") >= 0, hCap2.deep("entryBox").slice(0, 300));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

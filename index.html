@@ -3128,7 +3128,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.52 · 2026-11-02";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.53 · 2026-11-02";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3683,6 +3683,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var points = allPointsNow();
     var refs = C.intradayRefs(metrics, points, pos, { code: st.code, plan: curPlan() });
     var ea = C.entryAdvice(metrics, points, mpData, ctx3Data, refs, lastSetup, dailyData, orderData, pos, st.code, { capital: curCapital() });
+    // 本金来源：用户显式设置（持仓卡）还是默认估算——默认值只影响股数，不应显示成"真实资金"
+    var capInfo = (function () {
+      var inp = Number($("inCapital").value);
+      if (inp > 0) return { custom: true };
+      var saved = st.capital && st.capital[st.code];
+      return { custom: saved > 0 };
+    })();
+
     lastEntryAdvice = ea;
     if (ea.hasPosition) {
       box.innerHTML = '<div class="sigwhy">' + ea.verdict + "：建仓建议只对空仓给出；持仓风控见「智能信号 / 交易计划」。</div>";
@@ -3703,7 +3711,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       '</b></span><span>现价RR <b>' + (ea.rr == null ? "--" : ea.rr.toFixed(2)) +
       '</b></span><span>回踩档RR <b>' + (ea.rrZone == null ? "--" : ea.rrZone.toFixed(2)) +
       '</b></span><span>仓位上限 <b>' + (ea.maxShares || 0) + " 股</b></span></div>";
-    html += '<div class="sigwhy">本金 ' + Math.round(ea.capital) + " · 满仓上限 " + ea.fullPos + " 股 · 按止损风险约 " + (ea.riskAmount == null ? "--" : ea.riskAmount) + " 元 · 带宽 ±" + (ea.bandPct == null ? "--" : ea.bandPct) + "%</div>";
+    html += '<div class="sigwhy">' +
+      (capInfo.custom ? ("本金 " + Math.round(ea.capital) + " 元（你设置）") : ("本金未设（默认按 " + Math.round(ea.capital) + " 元估算，仅影响股数）")) +
+      " · 满仓上限 " + ea.fullPos + " 股 · 按止损风险约 " + (ea.riskAmount == null ? "--" : ea.riskAmount) + " 元 · 带宽 ±" + (ea.bandPct == null ? "--" : ea.bandPct) + "%" +
+      (capInfo.custom ? "" : ' · <span style="color:#64748b">可在「持仓」卡填写你的可用资金</span>') + "</div>";
     if (ea.waitFor.length) html += '<div class="sigwhy">先等条件：' + ea.waitFor.join(" · ") + "</div>";
     html += '<div class="sigwhy" style="font-size:10.5px">' + ea.note + "</div>";
     html += '<div class="tradebar"><button class="ledclear" id="btnEntryPlan">填入建仓计划</button>' +
