@@ -2222,6 +2222,33 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
      * 放量跌破均价/破日内低/冲高回落 → 持仓减仓警告。
      * 与正式建仓的区别：这是"盘中试探仓"，RR 门槛 1.3（正式建仓仍要 2），仓位 ≤ 常规 1/3，止损必须快。
      */
+
+    /**
+     * 买点弹窗准入（分级提醒）：
+     * - 卖出/减仓信号：属于持仓风控 → 永远弹窗；
+     * - 买入信号：只有"强买点"才弹窗（RR≥1.8、量能≥2.5×、多周期确认、非追高、非尾盘），
+     *   普通"试探买点"只显示在卡片里，不弹窗——避免把弱信号当成关键提醒。
+     */
+    function burstAlertGate(b, mp, m, opt) {
+      const o = opt || {};
+      if (!b || !b.ok) return { popup: false, level: "info", reason: "无信号" };
+      const now = o.now || new Date();
+      const mins = now.getHours() * 60 + now.getMinutes();
+      const mk = o.market || "cn";
+      if (b.side === "sell") return { popup: true, level: "sell", reason: "持仓风控：卖出/减仓信号" };
+      if (b.side !== "long") return { popup: false, level: "info", reason: "无方向" };
+      const miss = [];
+      if (!(b.rr != null && b.rr >= 1.8)) miss.push("RR<1.8");
+      if (!(b.volX != null && b.volX >= 2.5)) miss.push("量能<2.5×");
+      if (!(mp && mp.valid >= 2 && mp.score >= 2)) miss.push("多周期未确认");
+      if (m && m.vwapDevPct != null && m.vwapDevPct >= 3) miss.push("追高");
+      if (mk === "cn" && mins >= 14 * 60 + 45) miss.push("尾盘不弹买入（T+1）");
+      if (o.ea && o.ea.suitable === "no") miss.push("建仓建议不支持");
+      return miss.length
+        ? { popup: false, level: "info", reason: "不弹窗：" + miss.join("、") }
+        : { popup: true, level: "buy", reason: "强买点：RR/量能/多周期/位置全部达标" };
+    }
+
     function intradayBurst(m, points, mp, refs, daily, order, code, opt) {
       const o = opt || {};
       const out = { ok: false, side: "none", kind: "", entry: null, stop: null, target: null, rr: null,
@@ -3104,6 +3131,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     attachPoolLive: attachPoolLive,
     entryAdvice: entryAdvice,
     intradayBurst: intradayBurst,
+    burstAlertGate: burstAlertGate,
     entryTrackAdd: entryTrackAdd, entryTrackEval: entryTrackEval, entryTrackStats: entryTrackStats, entryTrackPending: entryTrackPending,
     entryTrackGroups: entryTrackGroups, entryTrackCsv: entryTrackCsv,
     buildBackup: buildBackup, parseBackup: parseBackup,
@@ -3128,7 +3156,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.53 · 2026-11-02";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.54 · 2026-11-03";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3632,20 +3660,24 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           hhmm: b.at, kind: b.kind, entry: b.entry, stop: b.stop, target: b.target, rr: b.rr, side: isSell ? "sell" : "buy" });
         if (st.burstLog.length > 30) st.burstLog = st.burstLog.slice(-30);
         save({ burstLog: st.burstLog });
-        // 买卖点弹窗：敏捷信号触发时提示（10 分钟内同类只弹一次）
+        // 买卖点弹窗：只有"强买点"和"卖点/风控"才弹（普通试探买点只在卡片显示）
         try {
-          alertOnce("burst:" + st.code + ":" + (isSell ? "sell" : "buy") + ":" + b.kind + ":" + b.at,
-            isSell ? "sell" : "buy",
-            (isSell ? "敏捷卖点：" : "敏捷买点：") + b.kind + " · " + (isSell ? "卖出 " : "入场 ") + b.entry +
-            " · " + (isSell ? "回升失效 " : "止损 ") + b.stop + " · 目标 " + b.target +
-            " · RR " + (b.rr == null ? "--" : b.rr.toFixed(2)) + (b.holding ? "" : "（空仓观察）"),
-            metrics ? metrics.price : null, 10 * 60 * 1000);
+          var _gate = C.burstAlertGate(b, mpData, metrics, { market: C.marketOf(st.code), ea: lastEntryAdvice, now: new Date() });
+          if (_gate.popup) {
+            alertOnce("burst:" + st.code + ":" + (isSell ? "sell" : "buy") + ":" + b.kind + ":" + b.at,
+              _gate.level,
+              (isSell ? "【关键卖点·风控】" : "【关键买点】") + b.kind + " · " + (isSell ? "卖出 " : "入场 ") + b.entry +
+              " · " + (isSell ? "回升失效 " : "止损 ") + b.stop + " · 目标 " + b.target +
+              " · RR " + (b.rr == null ? "--" : b.rr.toFixed(2)) +
+              (isSell ? " · 跌破即减仓" : " · 仓位≤1/3 · 跌破 " + b.stop + " 即作废（T+1 明日才能卖）"),
+              metrics ? metrics.price : null, 10 * 60 * 1000);
+            try {
+              if (typeof notify === "function") notify({ id: "burst-" + st.code, level: isSell ? "warn" : "buy",
+                text: isSell ? ("减仓警告 " + b.kind + " " + C.displayCode(st.code) + " 卖出 " + b.entry + " 回补/失效 " + b.stop)
+                             : (b.kind + " " + C.displayCode(st.code) + " 入场 " + b.entry + " 止损 " + b.stop + " 目标 " + b.target) });
+            } catch (e) {}
+          }
         } catch (e) { /* 忽略 */ }
-        try {
-          if (typeof notify === "function") notify({ id: "burst-" + st.code, level: isSell ? "warn" : "buy",
-            text: isSell ? ("减仓警告 " + b.kind + " " + C.displayCode(st.code) + " 卖出 " + b.entry + " 回补/失效 " + b.stop)
-                         : (b.kind + " " + C.displayCode(st.code) + " 入场 " + b.entry + " 止损 " + b.stop + " 目标 " + b.target) });
-        } catch (e) {}
       }
     } else {
       html += '<div class="sigwhy">当前无有效异动（盘中扫描：3 分钟量能 ≥2× 且收回均价/突破前高才触发）</div>';
@@ -3670,7 +3702,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           " · RR " + (x.rr == null ? "--" : x.rr.toFixed(2)) + " · " + stTxt + "</span></div>";
       });
     }
-    html += '<div class="sigwhy" style="font-size:10.5px">买卖点同一套规则：买点是"试探仓"（RR≥1.3，仓位≤常规 1/3）；卖点是"减仓/卖出"（放量跌破均价、破日内低、冲高回落）。A 股 T+1，今天买明天才能卖。</div>';
+    html += '<div class="sigwhy" style="font-size:10.5px">买卖点规则：买点分"强买点"和"试探买点"——只有强买点（RR≥1.8、量能≥2.5×、多周期确认、非追高、非尾盘）才弹窗，普通试探买点只在卡片显示；卖点（放量跌破均价/破日内低/冲高回落）会弹窗提醒。仓位≤常规 1/3，A 股 T+1，今天买明天才能卖。</div>';
     box.innerHTML = html;
     if (meta) meta.textContent = b.side === "sell" ? (b.holding ? "减仓/卖出" : "观察卖点") : (b.side === "long" ? "试探买点" : (b.warn && b.warn.length ? "警告" : "扫描中"));
   }

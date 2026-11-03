@@ -1470,7 +1470,7 @@ ok("三个卡片都接入弹窗", (html.match(/alertOnce\(/g) || []).length >= 4
 ok("复用提醒队列 buy/sell 等级", html.includes('buy: "买入点"') && html.includes('sell: "卖出点"'));
 ok("弹窗冷却逻辑存在", html.includes("lastSignalAlertAt"));
 ok("智能信号弹窗文案", html.includes("智能信号 ") && html.includes("减仓/卖点"));
-ok("敏捷信号弹窗文案", html.includes("敏捷买点：") && html.includes("敏捷卖点："));
+ok("敏捷信号弹窗文案（强买点/卖点）", html.includes("【关键买点】") && html.includes("【关键卖点·风控】"));
 ok("建仓建议弹窗文案", html.includes("建仓建议（"));
 
 
@@ -1524,6 +1524,20 @@ try { hCap2.run(coreSrc); hCap2.run(uiSrc); } catch (e) { threwCap2 = e; }
 ok("已设本金场景无异常", !threwCap2, threwCap2 && threwCap2.message);
 await new Promise((r) => setTimeout(r, 300));
 ok("已设本金时显示『你设置』", hCap2.deep("entryBox").indexOf("你设置") >= 0, hCap2.deep("entryBox").slice(0, 300));
+
+
+/* ---------- 54) 弹窗分级准入（强买点才弹，弱买点只显示） ---------- */
+console.log("\n[弹窗分级准入]");
+const gBuy = { ok: true, side: "long", rr: 2.2, volX: 3.1 };
+const gMp = { valid: 3, score: 3 };
+const gM = { vwapDevPct: 1.0 };
+const gNow = new Date(2026, 10, 3, 10, 30);
+ok("强买点 → 弹窗", C.burstAlertGate(gBuy, gMp, gM, { market: "cn", now: gNow }).popup === true, C.burstAlertGate(gBuy, gMp, gM, { market: "cn", now: gNow }));
+ok("弱买点 → 不弹窗（只显示卡片）", C.burstAlertGate({ ok: true, side: "long", rr: 1.35, volX: 1.6 }, { valid: 1, score: 0 }, { vwapDevPct: 1 }, { market: "cn", now: gNow }).popup === false);
+ok("卖点 → 永远弹窗（风控）", C.burstAlertGate({ ok: true, side: "sell", kind: "放量跌破均价" }, null, gM, { market: "cn" }).popup === true);
+ok("尾盘买入 → 不弹窗（T+1）", C.burstAlertGate(gBuy, gMp, gM, { market: "cn", now: new Date(2026, 10, 3, 14, 50) }).popup === false);
+ok("建仓建议不支持 → 不弹窗", C.burstAlertGate(gBuy, gMp, gM, { market: "cn", now: gNow, ea: { suitable: "no" } }).popup === false);
+ok("页面含分级文案", html.includes("强买点") && html.includes("普通试探买点只在卡片显示"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
