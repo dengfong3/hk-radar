@@ -1595,5 +1595,14 @@ ok("AI 简报自动触发", html.includes("maybeAIBrief") && html.includes("gene
 ok("上下文含个股/板块/大盘", html.includes("buildAIContext") && html.includes("fetchSectorCtx") && html.includes("fetchMarketCtx"));
 ok("Key 只存本机", html.includes("st.aiKey") && html.includes("只保存在本机浏览器"));
 
+
+/* ---------- 59) 无 Key 时回退到上一版机器简报 ---------- */
+console.log("\n[AI 回退模式]");
+ok("AI 设置区可折叠", html.includes('id="aiSetup"') && html.includes("applyAIMode"));
+ok("无 Key 提示与配置按钮", html.includes("未配置 DeepSeek API Key") && html.includes("aiSetupToggle"));
+ok("无 Key 时用机器简报（上一版方式）", html.includes("机器简报（规则版") && html.includes("等同上一版方式"));
+ok("无 Key 时有立即生成/复制全文", html.includes('id="anaNow"') && html.includes('id="anaCopy"'));
+ok("有 Key 才显示 AI 输出", html.includes("hasAIKey") && html.includes("out.style.display = has ? \"\" : \"none\""));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

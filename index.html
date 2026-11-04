@@ -298,14 +298,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 <div class="card">
   <div class="card-title"><b>实时分析简报</b><span class="sp"></span><span id="anaMeta" style="font-size:10px"></span></div>
   <div class="hint" id="aiHint" style="display:none"></div>
-  <div class="posgrid" style="grid-template-columns:1fr;gap:6px">
-    <div><label>DeepSeek API Key（仅存本机）</label><input id="aiKey" type="password" placeholder="sk-..."></div>
-    <div><label>模型</label><input id="aiModel" placeholder="deepseek-v4.1-flash"></div>
-  </div>
-  <div style="display:flex;gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap">
-    <button class="btn" id="aiGen">生成 AI 简报</button>
-    <label style="font-size:11px;color:#94a3b8"><input type="checkbox" id="aiAuto" checked> 每 15 分钟自动</label>
-    <span id="aiStatus" style="font-size:10px;color:#8b9ab1"></span>
+  <div id="aiSetup" style="display:none">
+    <div class="posgrid" style="grid-template-columns:1fr;gap:6px">
+      <div><label>DeepSeek API Key（仅存本机）</label><input id="aiKey" type="password" placeholder="sk-..."></div>
+      <div><label>模型</label><input id="aiModel" placeholder="deepseek-v4.1-flash"></div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap">
+      <button class="btn" id="aiGen">生成 AI 简报</button>
+      <label style="font-size:11px;color:#94a3b8"><input type="checkbox" id="aiAuto" checked> 每 15 分钟自动</label>
+      <span id="aiStatus" style="font-size:10px;color:#8b9ab1"></span>
+    </div>
   </div>
   <div class="sigbox" id="anaBox"></div>
   <div class="hint" id="aiOutHint" style="display:none"></div>
@@ -3308,7 +3310,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.59 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.60 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3436,10 +3438,28 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var ts = new Date();
     var hh = ts.getHours() < 10 ? "0" + ts.getHours() : ts.getHours();
     var mm = ts.getMinutes() < 10 ? "0" + ts.getMinutes() : ts.getMinutes();
-    if (meta) meta.textContent = "机器摘要 " + hh + ":" + mm + (force ? "（手动）" : "（自动）");
     lastRuleBrief = text;
-    box.innerHTML = '<div class="hint">机器摘要（规则引擎，随行情刷新；AI 深度版见下方）</div>' +
-      '<pre style="white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit">' + escHtml(text) + "</pre>";
+    var hasKey = hasAIKey();
+    if (meta) meta.textContent = (hasKey ? "机器摘要 " : "生成于 ") + hh + ":" + mm + (force ? "（手动）" : "（自动）");
+    if (hasKey) {
+      box.innerHTML = '<div class="hint">机器摘要（规则引擎，随行情刷新；AI 深度版见下方）</div>' +
+        '<pre style="white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit">' + escHtml(text) + "</pre>";
+    } else {
+      box.innerHTML = '<div class="hint">机器简报（规则版，未配置 DeepSeek Key，等同上一版方式）</div>' +
+        '<div style="display:flex;gap:6px;margin-bottom:4px">' +
+        '<button class="btn" id="anaNow">立即生成</button><button class="btn" id="anaCopy">复制全文</button></div>' +
+        '<pre style="white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit">' + escHtml(text) + "</pre>";
+      var bn = box.querySelector("#anaNow");
+      if (bn) bn.addEventListener("click", function () { renderAnalysisCard(true); });
+      var bc = box.querySelector("#anaCopy");
+      if (bc) bc.addEventListener("click", function () {
+        try {
+          navigator.clipboard.writeText(lastRuleBrief);
+          bc.textContent = "已复制";
+          setTimeout(function () { bc.textContent = "复制全文"; }, 1200);
+        } catch (e) { /* 忽略 */ }
+      });
+    }
   }
 
   /* ---------- AI 深度简报（DeepSeek，结合个股/板块/大盘） ---------- */
@@ -3642,23 +3662,41 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (!metrics || metricsCode !== st.code) return;
     if (st.aiCode !== st.code || !st.aiAt || Date.now() - st.aiAt >= 15 * 60 * 1000) generateAIBrief(false);
   }
+  function hasAIKey() { return !!(st.aiKey && String(st.aiKey).trim()); }
+  function applyAIMode() {
+    var has = hasAIKey();
+    var setup = $("aiSetup"), hint = $("aiHint"), out = $("aiOut"), outHint = $("aiOutHint");
+    if (setup) setup.style.display = (has || st.aiSetupOpen) ? "" : "none";
+    if (out) out.style.display = has ? "" : "none";
+    if (outHint) outHint.style.display = has ? "" : "none";
+    if (!hint) return;
+    if (has) { hint.style.display = "none"; return; }
+    hint.style.display = "";
+    hint.innerHTML = "⚠ 未配置 DeepSeek API Key：当前使用<b>机器简报（规则版，上一版方式）</b>，每 15 分钟自动刷新。" +
+      ' <button class="btn" id="aiSetupToggle" style="padding:1px 7px;font-size:10px">配置 AI</button>';
+    var tg = $("aiSetupToggle");
+    if (tg) tg.addEventListener("click", function () {
+      st.aiSetupOpen = true; save({ aiSetupOpen: true }); applyAIMode();
+      var kk = $("aiKey"); if (kk) kk.focus();
+    });
+  }
   function initAISettings() {
     var k = $("aiKey"), m = $("aiModel"), a = $("aiAuto");
     if (k) k.value = st.aiKey || "";
     if (m) m.value = st.aiModel || "deepseek-v4.1-flash";
     if (a) a.checked = st.aiAuto !== false;
-    if (k) k.addEventListener("change", function () { st.aiKey = k.value.trim(); save({ aiKey: st.aiKey }); });
+    if (k) k.addEventListener("change", function () {
+      st.aiKey = k.value.trim(); save({ aiKey: st.aiKey, aiSetupOpen: false }); st.aiSetupOpen = false;
+      applyAIMode();
+      try { renderAnalysisCard(true); } catch (e) {}
+    });
     if (m) m.addEventListener("change", function () { st.aiModel = m.value.trim(); save({ aiModel: st.aiModel }); });
     if (a) a.addEventListener("change", function () { st.aiAuto = !!a.checked; save({ aiAuto: st.aiAuto }); });
     var g = $("aiGen");
     if (g) g.addEventListener("click", function () { generateAIBrief(true); });
+    applyAIMode();
     var out = $("aiOut");
     if (out && st.aiText && st.aiCode === st.code) out.textContent = st.aiText;
-    var hint = $("aiHint");
-    if (hint && !st.aiKey) {
-      hint.style.display = "";
-      hint.textContent = "⚠ 未配置 DeepSeek API Key：填入下方（只保存在本机浏览器）后点「生成 AI 简报」；建议使用限额 Key。";
-    }
     var st2 = $("aiStatus");
     if (st2 && st.aiAt) {
       var d = new Date(st.aiAt);
