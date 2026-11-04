@@ -214,6 +214,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
 
+.sinote{margin-top:6px;font-size:10.5px;line-height:1.55;color:#a7f3d0;background:#0e1f1a;
+  border-left:2px solid #34d399;padding:4px 7px;border-radius:5px;white-space:pre-wrap}
 .disclaimer{font-size:10px;color:var(--dim2);line-height:1.7;margin-top:10px;padding:9px;
   border:1px solid var(--line2);border-radius:9px}
 </style>
@@ -304,7 +306,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       <div><label>模型</label><input id="aiModel" placeholder="deepseek-v4.1-flash"></div>
     </div>
     <div style="display:flex;gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap">
-      <button class="btn" id="aiGen">生成 AI 简报</button>
+      <button class="btn" id="aiGen">生成 AI 分析（全部卡片）</button>
+      <button class="btn" id="aiClearKey">清除 Key</button>
       <label style="font-size:11px;color:#94a3b8"><input type="checkbox" id="aiAuto" checked> 每 15 分钟自动</label>
       <span id="aiStatus" style="font-size:10px;color:#8b9ab1"></span>
     </div>
@@ -334,10 +337,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="sigbox" id="poolBox"></div>
 </div>
 
-<div class="card">
-  <div class="card-title"><b>每日简报</b><span class="sp"></span><span id="briefMeta" style="font-size:10px"></span></div>
-  <div class="sigbox" id="briefBox"></div>
-</div>
+<div id="briefHidden" style="display:none"><span id="briefBox"></span><span id="briefMeta"></span></div>
 
 <div class="card">
   <div class="card-title"><b>信号台账</b><span class="sp"></span><span id="ledgerMeta" style="font-size:10px"></span></div>
@@ -3310,7 +3310,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.60 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.61 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3566,12 +3566,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         lastBars: (dailyData.lastBars || []).slice(-6)
       } : null,
       multiPeriod: { bias: mp.bias, score: mp.score, valid: mp.valid },
-      order: orderData || null,
-      wash: rc.wash || null,
       setup: rc.setup || null,
       plan: rc.plan || null,
       entryAdvice: rc.ea || null,
       refs: rc.refs || null,
+      order: orderData || null,
+      wash: rc.wash || null,
+      burst: (function () { try { return C.intradayBurst(metrics, points, mpData, rc.refs, dailyData, orderData, st.code, { pos: pos }); } catch (e) { return null; } })(),
+      pool: (function () { try { var tk = C.todayStr(); for (var i2 = 0; i2 < (st.pools || []).length; i2++) if (st.pools[i2].date === tk) return st.pools[i2]; } catch (e) {} return null; })(),
+      tradePlan: (typeof curPlan === "function" ? curPlan() : null),
       position: (pos.shares > 0 && pos.cost > 0) ? { shares: pos.shares, cost: pos.cost, pnl: Math.round(pnl), pnlPct: (metrics.price / pos.cost - 1) * 100 } : null,
       sector: sector || null,
       market: market || [],
@@ -3581,25 +3584,42 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     };
   }
   function aiSystemPrompt() {
-    return "你是A股/港股实时盘面分析助手，只依据用户提供的实时数据做判断，禁止编造数据；数据缺失就明确说明。\n" +
-      "要求：\n" +
-      "1) 先给明确结论：当前更适合「持股 / 减仓 / 清仓 / 观望 / 建仓」中的哪一种，一句话说清核心理由；若用户有持仓（position），给出具体动作与股数建议。\n" +
-      "2) 分三层分析，必须引用具体数字与价位：①个股结构与量价（趋势、均线、VWAP、日内位置、量能、洗盘/出货证据、评分与否决项）②所属板块（板块涨跌、主力资金、领涨个股、个股相对板块强弱）③大盘环境（各指数涨跌、市场风格、对个股的助力或拖累）。要指出矛盾点，例如个股强于板块但大盘弱、板块强但个股不涨。\n" +
-      "3) 给出关键位：压力、支撑、止损/失效条件；并给出明日三种情景（高开/平开/低开）分别怎么做。\n" +
-      "4) 末尾必须写风险提示，声明不构成投资建议、不承诺收益。\n" +
-      "输出 600-900 字，分节：一、结论与动作 二、个股结构 三、板块与大盘 四、关键位与情景 五、风险提示。";
+    return "你是A股/港股实时盘面分析助手，只依据用户提供的实时数据做判断，禁止编造数据；缺失就明确说明。\n" +
+      "必须结合三层：①个股结构与量价 ②所属板块强弱 ③大盘环境，引用具体数字与价位，并指出矛盾点（例如个股强于板块但大盘弱）。\n" +
+      "只输出一个 JSON 对象（不要 markdown 代码块、不要多余文字），键如下，每个值是 60~140 字中文：\n" +
+      '{"brief":"总体结论：当前适合持股/减仓/清仓/观望/建仓 + 核心理由 + 具体动作（有持仓则给股数）",' +
+      '"pricePlan":"下一步买卖点：结合减仓档/加仓档/止损给出当前该做什么",' +
+      '"refs":"日内参考位：压力/支撑/均价意义，当前价格在区间中的位置",' +
+      '"multiPeriod":"多周期节奏：5/15/30/60分共振或分歧的含义与操作含义",' +
+      '"signal":"智能信号：评分/等级/否决项意味着什么，是否可执行",' +
+      '"burst":"盘中异动：当前有无买卖点、量价是否配合、是否追高",' +
+      '"entry":"建仓建议：空仓是否可建仓、区间/止损/目标/RR 是否值得",' +
+      '"wash":"洗盘/出货：证据倾向洗盘还是出货，后续如何验证",' +
+      '"macro":"日线/盘口/大盘：趋势、委比、指数环境对个股的助力或拖累",' +
+      '"pool":"尾盘观察池：池子里的票与当前个股/板块的联动（无数据就说明）",' +
+      '"tradePlan":"交易计划：若用户有持仓/交易计划，给出按当前分析的调整建议（无计划则给出可执行计划框架）",' +
+      '"risk":"风险提示（含不构成投资建议）"}\n' +
+      "数值要来自输入数据；不要给虚假目标价；不要承诺收益。";
+  }
+  function parseAICards(raw) {
+    var t = String(raw || "").trim();
+    t = t.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    var a = t.indexOf("{"), b = t.lastIndexOf("}");
+    if (a >= 0 && b > a) t = t.slice(a, b + 1);
+    try { var o = JSON.parse(t); if (o && typeof o === "object") return o; } catch (e) {}
+    return null;
   }
   function callDeepSeek(ctx) {
     var key = String(st.aiKey || "").trim();
     if (!key) return Promise.reject(new Error("请先在「实时分析简报」卡里填 DeepSeek API Key"));
     var model = String(st.aiModel || "deepseek-v4.1-flash").trim();
-    var user = "请基于以下实时数据分析（json）：\n" + JSON.stringify(ctx);
+    var user = "请基于以下实时数据，对全部卡片做一次深度分析（json 输入）：\n" + JSON.stringify(ctx);
     function once(mdl) {
       return fetch("https://api.deepseek.com/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
         body: JSON.stringify({
-          model: mdl, temperature: 0.35, max_tokens: 1400,
+          model: mdl, temperature: 0.35, max_tokens: 2000,
           messages: [{ role: "system", content: aiSystemPrompt() }, { role: "user", content: user }]
         })
       }).then(function (r) {
@@ -3612,7 +3632,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           }
           var c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
           if (!c) throw new Error("AI 返回为空");
-          return { text: String(c).trim(), model: mdl };
+          var cards = parseAICards(c);
+          return { cards: cards || { brief: String(c).trim() }, raw: String(c).trim(), model: mdl };
         });
       });
     }
@@ -3620,6 +3641,40 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (e && (e.status === 400 || e.status === 404) && /model/i.test(String(e.message))) return once("deepseek-chat");
       throw e;
     });
+  }
+  var AI_CARD_MAP = [
+    ["ladder", "pricePlan"], ["refs", "refs"], ["mp", "multiPeriod"], ["sigBox", "signal"],
+    ["burstBox", "burst"], ["entryBox", "entry"], ["washBox", "wash"], ["macroBox", "macro"],
+    ["poolBox", "pool"], ["planSummary", "tradePlan"]
+  ];
+  function paintAINotes() {
+    for (var i = 0; i < AI_CARD_MAP.length; i++) {
+      var box = $(AI_CARD_MAP[i][0]), key = AI_CARD_MAP[i][1];
+      if (!box) continue;
+      var old = box.querySelector ? box.querySelector(".sinote") : null;
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      if (!st.aiCards || st.aiCode !== st.code) continue;
+      var txt = st.aiCards[key];
+      if (!txt) continue;
+      var d = document.createElement("div");
+      d.className = "sinote";
+      d.textContent = "🤖 AI：" + String(txt).replace(/\*\*/g, "");
+      box.appendChild(d);
+    }
+  }
+  function rerenderForAINotes() {
+    try { if (metrics) render(metrics, parsed ? parsed.points : []); } catch (e) {}
+    try { renderMultiCard(); } catch (e) {}
+    try { renderSignalCard(); } catch (e) {}
+    try { renderBurstCard(); } catch (e) {}
+    try { renderEntryCard(); } catch (e) {}
+    try { renderEntryTrackCard(); } catch (e) {}
+    try { renderWashCard(); } catch (e) {}
+    try { renderMacroCard(); } catch (e) {}
+    try { renderPoolCard(); } catch (e) {}
+    try { renderPlanSummary(); } catch (e) {}
+    try { renderAnalysisCard(); } catch (e) {}
+    try { paintAINotes(); } catch (e) {}
   }
   function generateAIBrief(manual) {
     if (aiBusy) return;
@@ -3637,18 +3692,21 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (status) status.textContent = "拉取板块/大盘…";
     Promise.all([fetchSectorCtx(st.code), fetchMarketCtx()])
       .then(function (arr) {
-        if (status) status.textContent = "AI 分析中…";
+        if (status) status.textContent = "AI 分析全部卡片中…";
         return callDeepSeek(buildAIContext(arr[0], arr[1]));
       })
       .then(function (res) {
-        st.aiAt = Date.now(); st.aiCode = st.code; st.aiText = res.text; st.aiModelUsed = res.model;
-        save({ aiAt: st.aiAt, aiCode: st.aiCode, aiText: st.aiText, aiModelUsed: st.aiModelUsed });
-        if (out) out.textContent = res.text;
+        st.aiAt = Date.now(); st.aiCode = st.code; st.aiCards = res.cards;
+        st.aiText = res.cards.brief || res.raw || ""; st.aiModelUsed = res.model;
+        try { save({ aiAt: st.aiAt, aiCode: st.aiCode, aiCards: st.aiCards, aiText: st.aiText, aiModelUsed: st.aiModelUsed }); } catch (e) {}
+        var txt = st.aiText + (res.cards.risk ? "\n\n风险提示：" + res.cards.risk : "");
+        if (out) out.textContent = txt;
         var ts = new Date();
         var hh = ts.getHours() < 10 ? "0" + ts.getHours() : ts.getHours();
         var mm = ts.getMinutes() < 10 ? "0" + ts.getMinutes() : ts.getMinutes();
-        if (status) status.textContent = "AI 完成 " + hh + ":" + mm + " · " + res.model;
-        if (hint) { hint.style.display = ""; hint.textContent = "AI 分析基于实时数据生成，仅作参考，不构成投资建议。"; }
+        if (status) status.textContent = "AI 完成（全部卡片）" + hh + ":" + mm + " · " + res.model;
+        if (hint) { hint.style.display = ""; hint.textContent = "AI 已把解读写入各卡片（绿色块）；仅作参考，不构成投资建议。"; }
+        try { rerenderForAINotes(); } catch (e) {}
       })
       .catch(function (e) {
         if (status) status.textContent = "AI 失败";
@@ -3694,6 +3752,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (a) a.addEventListener("change", function () { st.aiAuto = !!a.checked; save({ aiAuto: st.aiAuto }); });
     var g = $("aiGen");
     if (g) g.addEventListener("click", function () { generateAIBrief(true); });
+    var ck = $("aiClearKey");
+    if (ck) ck.addEventListener("click", function () {
+      if (!confirm("确定清除本机保存的 DeepSeek Key？清除后回到机器简报模式。")) return;
+      st.aiKey = ""; save({ aiKey: "" }); applyAIMode();
+      try { renderAnalysisCard(true); } catch (e) {}
+    });
     applyAIMode();
     var out = $("aiOut");
     if (out && st.aiText && st.aiCode === st.code) out.textContent = st.aiText;
@@ -3949,7 +4013,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       var keys = Object.keys(st.briefs).sort();
       while (keys.length > 20) { delete st.briefs[keys.shift()]; }
       save({ briefs: st.briefs });
-      renderBriefCard();
+      
     }
   }
 
@@ -4011,7 +4075,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (meta) meta.textContent = saveError ? "保存失败" : (when ? "已保存" : "未保存");
     var bExp = $("btnBackupExport"), bImp = $("btnBackupImport"), fImp = $("backupFile");
     if (bExp) bExp.addEventListener("click", function () {
-      var txt = C.buildBackup(st, Date.now());
+      var safe = Object.assign({}, st);
+      delete safe.aiKey; delete safe.aiSetupOpen; delete safe.aiText; delete safe.aiCards;
+      delete safe.aiModelUsed; delete safe.aiCode; delete safe.aiAt;
+      var txt = C.buildBackup(safe, Date.now());
       var name = "hk-radar-backup-" + C.todayStr().replace(/-/g, "") + "-" + new Date().toTimeString().slice(0, 5).replace(":", "") + ".json";
       try {
         var blob = new Blob([txt], { type: "application/json" });
@@ -4032,7 +4099,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         fr.onload = function () {
           var restored = C.parseBackup(fr.result);
           if (!restored) { alert("备份文件格式不正确（应为 hk-radar 导出的 JSON）"); return; }
+          var keepKey = st.aiKey;
           st = Object.assign(load(), restored);
+          if (keepKey) st.aiKey = keepKey;
           save(st);
           alert("已导入备份，页面将刷新");
           location.reload();
@@ -4076,8 +4145,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       var tk2 = todayKey();
       if (st.briefs) delete st.briefs[C.briefKey(tk2, st.code)];
       save({ briefs: st.briefs });
-      ensureBriefs();
-      renderBriefCard();
+      
+      
     });
     if (meta) meta.textContent = ph.ok ? ({ preopen: "盘前", session: "盘中", midday: "午间", postclose: "盘后" })[ph.phase] : "";
   }
@@ -5472,7 +5541,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         // 日线（5 分钟）/ 大盘（60 秒）/ 盘口（每轮，仅 A 股）
         if (dailyCode !== st.code || Date.now() - dailyAt > 300000) {
           fetchDaily(st.code).then(function (d) { dailyData = d; dailyAt = Date.now(); dailyCode = st.code;
-            try { ensureBriefs(); renderBriefCard(); } catch (e) {} }).catch(function () {});
+            try {   } catch (e) {} }).catch(function () {});
         }
         if (Date.now() - indexAt > 60000) {
           fetchIndex(st.code).then(function (ix) { indexData = ix; indexAt = Date.now(); }).catch(function () {});
@@ -5522,7 +5591,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
         try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
         try { if (st.anaCode !== st.code || !st.anaAt || Date.now() - st.anaAt >= 15 * 60 * 1000) renderAnalysisCard(); } catch (e) { /* 简报失败不阻塞 */ }
-        try { maybeAIBrief(); } catch (e) { /* AI 简报失败不阻塞 */ }
+        try { maybeAIBrief(); } catch (e) { /* AI 失败不阻塞 */ }
+        try { paintAINotes(); } catch (e) { /* AI 解读失败不阻塞 */ }
         try {
           if (st.watch.length > 1 && Date.now() - multiLiveAt > 15000) fetchMultiLive();
         } catch (e) {}
@@ -5531,7 +5601,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           if (missingName && Date.now() - lastNamesFetch > 300000) { lastNamesFetch = Date.now(); fetchWatchNames(); }
         } catch (e) {}
         try { if (Date.now() - lastTrackVerify > 60000) { lastTrackVerify = Date.now(); verifyEntryTrack(); } } catch (e) {}
-        try { ensureBriefs(); renderBriefCard(); } catch (e) { /* 简报失败不阻塞 */ }
+        try {   } catch (e) { /* 简报失败不阻塞 */ }
         if (historyCode !== requested || !historyPoints || Date.now() - historyAt > 180000) {
           fetchHistory(requested).then(function (pts) {
             if (!pts || !pts.length || requested !== st.code) return;
@@ -5660,7 +5730,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   try { renderEntryCard(); } catch (e) {}
   try { renderEntryTrackCard(); } catch (e) {}
     $("px").textContent = "读取中…"; $("px").className = "px flat"; $("chg").textContent = C.displayCode(code);
-    try { renderBriefCard(); } catch (e) {}
     tick(true);
   }
 
@@ -5840,7 +5909,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var dirty = false;
     Object.keys(st.briefs).forEach(function (k) { if (k.indexOf(" ") < 0) { delete st.briefs[k]; dirty = true; } });
     if (dirty) save({ briefs: st.briefs });
-    try { renderBriefCard(); } catch (e) {}
   })();
   $("btnForce").addEventListener("click", function () {
     $("btnForce").textContent = "更新中…";

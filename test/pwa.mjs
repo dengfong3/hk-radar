@@ -900,7 +900,7 @@ ok("盘后简报：含今日涨跌与收盘位置", postB.ok && postB.summary.in
 ok("盘后简报：含系统评分/洗盘结论", postB.lines.some((l) => l.v.indexOf("倾向洗盘") >= 0) && postB.lines.some((l) => l.k === "系统评分"), postB.lines);
 ok("盘后简报：给出明日动作", postB.actions.length >= 3 && postB.actions.some((a) => a.act.indexOf("减仓") >= 0 || a.act.indexOf("低吸") >= 0), postB.actions);
 ok("盘后简报：带风险管理提示", postB.risks.length > 0, postB.risks);
-ok("页面含每日简报卡片", html.includes("briefBox") && html.includes("每日简报"));
+ok("每日简报卡片已删除", !html.includes("<b>每日简报</b>"));
 
 
 /* ---------- 23) 简报按股票隔离 ---------- */
@@ -924,10 +924,7 @@ let threw7 = null;
 try { h7.run(coreSrc); h7.run(uiSrc); } catch (e) { threw7 = e; }
 ok("渲染：简报隔离场景无异常", !threw7, threw7 && threw7.message);
 await new Promise((r) => setTimeout(r, 250));
-const bt = h7.deep("briefBox");
-ok("渲染：只显示当前股票的简报（AA股数据）", bt.indexOf("AA股数据") >= 0, bt.slice(0, 200));
-ok("渲染：不显示其它股票的简报（BB股数据）", bt.indexOf("BB股数据") < 0, bt.slice(0, 200));
-ok("渲染：标题带股票代码", bt.indexOf("300607") >= 0, bt.slice(0, 120));
+ok("简报卡片已删除（不再渲染简报 DOM）", h7.deep("briefBox") === "", h7.deep("briefBox").slice(0, 80));
 ok("渲染：旧格式键被清理", (function () { const saved = h7.saved(); const keys = Object.keys(saved.briefs || {}); return keys.indexOf(todayK) < 0; })());
 
 
@@ -1603,6 +1600,17 @@ ok("无 Key 提示与配置按钮", html.includes("未配置 DeepSeek API Key") 
 ok("无 Key 时用机器简报（上一版方式）", html.includes("机器简报（规则版") && html.includes("等同上一版方式"));
 ok("无 Key 时有立即生成/复制全文", html.includes('id="anaNow"') && html.includes('id="anaCopy"'));
 ok("有 Key 才显示 AI 输出", html.includes("hasAIKey") && html.includes("out.style.display = has ? \"\" : \"none\""));
+
+
+/* ---------- 60) AI 全卡分析 + Key 安全 ---------- */
+console.log("\n[AI 全卡分析 / Key 安全]");
+ok("AI 解读映射全部卡片", html.includes("AI_CARD_MAP") && html.includes('"pricePlan"') && html.includes('"tradePlan"') && html.includes('"pool"'));
+ok("AI 解读注入函数", html.includes("paintAINotes") && html.includes("rerenderForAINotes"));
+ok("一次调用写回多卡片", html.includes("parseAICards") && html.includes("JSON.parse"));
+ok("备份导出剔除 Key", html.includes("delete safe.aiKey") && html.includes("buildBackup(safe"));
+ok("导入不会带别人的 Key", html.includes("var keepKey = st.aiKey"));
+ok("可清除本机 Key", html.includes("aiClearKey") && html.includes("清除本机保存的 DeepSeek Key"));
+ok("每日简报卡片已删除", !html.includes("<b>每日简报</b>"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
