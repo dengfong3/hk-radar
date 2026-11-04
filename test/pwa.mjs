@@ -1599,7 +1599,7 @@ ok("AI 设置区置顶（在顶部卡片）", html.includes('id="aiTopCard"') &&
 ok("无 Key 提示与配置按钮", html.includes("未配置大模型 Key") && html.includes('id="aiKey"') && html.includes('id="aiGen"'));
 ok("无 Key 时用机器简报（上一版方式）", html.includes("机器简报（规则版") && html.includes("等同上一版方式"));
 ok("无 Key 时只有简版提示（可展开机器简报）", html.includes("anaConfig") && html.includes("anaShowMachine") && html.includes("anaCopy"));
-ok("有 Key 才显示 AI 输出", html.includes("hasAIKey") && html.includes("out.style.display = has ? \"\" : \"none\""));
+ok("有 Key 时 AI 简报进入主卡", html.includes("aibrieftext") && html.includes("立即生成 AI 简报") && html.includes("复制 AI 简报"));
 
 
 /* ---------- 60) AI 全卡分析 + Key 安全 ---------- */
@@ -1619,6 +1619,15 @@ ok("顶部置顶 AI 输入卡", html.includes('id="aiTopCard"') && html.includes
 ok("未配置时只显示简版提示", html.includes("当前只显示<b>简版提示</b>") && html.includes("显示机器简报"));
 ok("置顶卡有 Key/模型/生成/清除", html.includes('id="aiKey"') && html.includes('id="aiModel"') && html.includes('id="aiGen"') && html.includes('id="aiClearKey"'));
 ok("配置弹到简报卡", html.includes("openAIConfig") && html.includes("scrollIntoView"));
+
+
+/* ---------- 62) AI 为主：一键生成 + 规则明细折叠 ---------- */
+console.log("\n[AI 为主]");
+ok("简报卡一键生成 AI 简报", html.includes('id="anaAIGen"') && html.includes("generateAIBrief(true)"));
+ok("简报卡可复制 AI 简报", html.includes("anaAICopy"));
+ok("有 Key 时 AI 简报为主、机器摘要可折叠", html.includes("机器摘要（规则版，供核对）") && html.includes("anaRuleToggle"));
+ok("各卡片 AI 解读置顶", html.includes("AI_CARD_MAP") && html.includes("insertBefore(note, box.firstChild"));
+ok("规则明细默认折叠", html.includes("airulehide") && html.includes("显示规则明细"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

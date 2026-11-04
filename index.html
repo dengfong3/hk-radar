@@ -237,8 +237,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   #aiTopCard .aimodel{flex:1 1 100%}
   #aiTopCard .airow button{flex:1 1 auto}
 }
-.sinote{margin-top:6px;font-size:10.5px;line-height:1.55;color:#a7f3d0;background:#0e1f1a;
-  border-left:2px solid #34d399;padding:4px 7px;border-radius:5px;white-space:pre-wrap}
+.sinote{margin:0 0 5px;font-size:12px;line-height:1.58;color:#d1fae5;background:rgba(16,185,129,.12);
+  border-left:3px solid #34d399;padding:7px 9px;border-radius:6px;white-space:pre-wrap;font-weight:500}
+.airuletoggle{font-size:10px;color:#7c8aa0;margin:1px 0 5px;cursor:pointer;user-select:none}
+.airuletoggle:hover{color:#a9b6c9}
+.airulehide > *:not(.sinote):not(.airuletoggle){display:none}
+.aibrieftext{white-space:pre-wrap;font-size:12.5px;line-height:1.62;color:#e7ecf3;margin:2px 0 6px}
+.aibriefrisk{color:#fca5a5}
+.rulepre{white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit}
 .disclaimer{font-size:10px;color:var(--dim2);line-height:1.7;margin-top:10px;padding:9px;
   border:1px solid var(--line2);border-radius:9px}
 </style>
@@ -3332,7 +3338,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.63 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.64 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3462,10 +3468,41 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var mm = ts.getMinutes() < 10 ? "0" + ts.getMinutes() : ts.getMinutes();
     lastRuleBrief = text;
     var hasKey = hasAIKey();
-    if (meta) meta.textContent = (hasKey ? "机器摘要 " : "生成于 ") + hh + ":" + mm + (force ? "（手动）" : "（自动）");
     if (hasKey) {
-      box.innerHTML = '<div class="hint">机器摘要（规则引擎，随行情刷新；AI 深度版见下方）</div>' +
-        '<pre style="white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit">' + escHtml(text) + "</pre>";
+      var cards = (st.aiCode === st.code && st.aiCards) ? st.aiCards : null;
+      var aiBrief = cards && cards.brief ? String(cards.brief) : "";
+      var lastT = "";
+      if (st.aiAt && st.aiCode === st.code) {
+        var d0 = new Date(st.aiAt);
+        lastT = (d0.getHours() < 10 ? "0" : "") + d0.getHours() + ":" + (d0.getMinutes() < 10 ? "0" : "") + d0.getMinutes();
+      }
+      if (meta) meta.textContent = aiBrief ? ("AI " + lastT + (st.aiModelUsed ? " · " + st.aiModelUsed : "")) : "待生成";
+      box.innerHTML =
+        (aiBrief
+          ? '<div class="aibrieftext">' + escHtml(aiBrief) + "</div>" +
+            (cards.risk ? '<div class="sigwhy aibriefrisk">风险提示：' + escHtml(String(cards.risk)) + "</div>" : "")
+          : '<div class="hint">还没有 AI 简报：点「立即生成 AI 简报」，AI 会结合个股 / 板块 / 大盘做实时分析。</div>') +
+        '<div class="tradebar">' +
+        '<button class="btn" id="anaAIGen">立即生成 AI 简报</button>' +
+        '<button class="btn" id="anaAICopy">复制 AI 简报</button>' +
+        '<button class="btn" id="anaRuleToggle">' + (st.showMachineBrief ? "隐藏机器摘要" : "显示机器摘要") + "</button></div>" +
+        (st.showMachineBrief ? '<div class="hint">机器摘要（规则版，供核对）</div><pre class="rulepre">' + escHtml(text) + "</pre>" : "");
+      var ag = box.querySelector("#anaAIGen");
+      if (ag) ag.addEventListener("click", function () { generateAIBrief(true); });
+      var ac = box.querySelector("#anaAICopy");
+      if (ac) ac.addEventListener("click", function () {
+        try {
+          navigator.clipboard.writeText(aiBrief + (cards && cards.risk ? "\n\n风险提示：" + cards.risk : ""));
+          ac.textContent = "已复制";
+          setTimeout(function () { ac.textContent = "复制 AI 简报"; }, 1200);
+        } catch (e) { /* 忽略 */ }
+      });
+      var rt = box.querySelector("#anaRuleToggle");
+      if (rt) rt.addEventListener("click", function () {
+        st.showMachineBrief = !st.showMachineBrief;
+        save({ showMachineBrief: st.showMachineBrief });
+        renderAnalysisCard(true);
+      });
     } else if (st.showMachineBrief) {
       box.innerHTML = '<div class="hint">机器简报（规则版，未配置 DeepSeek Key，等同上一版方式）</div>' +
         '<div style="display:flex;gap:6px;margin-bottom:4px">' +
@@ -3482,6 +3519,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         } catch (e) { /* 忽略 */ }
       });
     } else {
+      if (meta) meta.textContent = "生成于 " + hh + ":" + mm + (force ? "（手动）" : "（自动）");
       var oneLine = "";
       try {
         var r1 = (lastRuleCtx && lastRuleCtx.refs && lastRuleCtx.refs.reduce && lastRuleCtx.refs.reduce[0]) || null;
@@ -3689,19 +3727,42 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     ["burstBox", "burst"], ["entryBox", "entry"], ["washBox", "wash"], ["macroBox", "macro"],
     ["poolBox", "pool"], ["planSummary", "tradePlan"]
   ];
+  function applyRuleVisibility(box, tg, key) {
+    var open = !!(st.aiRuleOpen && st.aiRuleOpen[key]);
+    if (box && box.classList) box.classList.toggle("airulehide", !open);
+    if (tg) tg.textContent = open ? "▾ 收起规则明细" : "▸ 显示规则明细";
+  }
   function paintAINotes() {
     for (var i = 0; i < AI_CARD_MAP.length; i++) {
       var box = $(AI_CARD_MAP[i][0]), key = AI_CARD_MAP[i][1];
       if (!box) continue;
-      var old = box.querySelector ? box.querySelector(".sinote") : null;
-      if (old && old.parentNode) old.parentNode.removeChild(old);
-      if (!st.aiCards || st.aiCode !== st.code) continue;
-      var txt = st.aiCards[key];
-      if (!txt) continue;
-      var d = document.createElement("div");
-      d.className = "sinote";
-      d.textContent = "🤖 AI：" + String(txt).replace(/\*\*/g, "");
-      box.appendChild(d);
+      var txt = (st.aiCards && st.aiCode === st.code) ? st.aiCards[key] : "";
+      var note = box.querySelector ? box.querySelector(".sinote") : null;
+      var tg = box.querySelector ? box.querySelector(".airuletoggle") : null;
+      if (!txt) {
+        if (note && note.parentNode) note.parentNode.removeChild(note);
+        if (tg && tg.parentNode) tg.parentNode.removeChild(tg);
+        if (box.classList) box.classList.remove("airulehide");
+        continue;
+      }
+      if (!note) {
+        note = document.createElement("div");
+        note.className = "sinote";
+        box.insertBefore(note, box.firstChild || null);
+        tg = document.createElement("div");
+        tg.className = "airuletoggle";
+        box.insertBefore(tg, note.nextSibling || null);
+        (function (k2) {
+          tg.addEventListener("click", function () {
+            st.aiRuleOpen = st.aiRuleOpen || {};
+            st.aiRuleOpen[k2] = !st.aiRuleOpen[k2];
+            save({ aiRuleOpen: st.aiRuleOpen });
+            applyRuleVisibility(box, tg, k2);
+          });
+        })(key);
+      }
+      note.textContent = "🤖 AI：" + String(txt).replace(/\*\*/g, "");
+      applyRuleVisibility(box, tg, key);
     }
   }
   function rerenderForAINotes() {
@@ -3793,8 +3854,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   function applyAIMode() {
     var has = hasAIKey();
     var out = $("aiOut"), outHint = $("aiOutHint");
-    if (out) out.style.display = has ? "" : "none";
-    if (outHint) outHint.style.display = has ? "" : "none";
+    if (out) out.style.display = "none";
+    if (outHint) outHint.style.display = "none";
     try { updateAITop(); } catch (e) {}
   }
   function initAISettings() {
