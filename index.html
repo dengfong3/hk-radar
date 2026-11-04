@@ -196,6 +196,24 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   color:var(--txt);font-size:14px}
 .fbtns button.primary{background:#1f3a5f;border-color:var(--accent);color:#dbeafe;font-weight:700}
 
+
+/* ===== 每卡实时价徽标（v0.58；保持 v0.54 单列排版） ===== */
+.cardpx{font-size:10px;font-weight:700;color:var(--txt);white-space:nowrap;margin-left:2px;
+  border:1px solid var(--line);border-radius:7px;padding:0 5px;background:var(--card2)}
+.cardpx.up{color:var(--up);border-color:rgba(248,113,113,.35)}
+.cardpx.down{color:var(--down);border-color:rgba(74,222,128,.35)}
+.cardpx.flat{color:var(--txt)}
+.head{flex-wrap:wrap}
+.codebar{flex-wrap:wrap}
+.codebar .cardpx{margin-left:auto}
+@media(max-width:560px){
+  .card-title{flex-wrap:wrap}
+  .card-title > span{max-width:100%}
+  .card-title > span[id$="Meta"],.card-title > span[id$="Bias"],.card-title > span[id$="Unit"]{
+    flex:1 0 100%;margin-left:0;font-size:9.5px;color:var(--dim2);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
+
 .disclaimer{font-size:10px;color:var(--dim2);line-height:1.7;margin-top:10px;padding:9px;
   border:1px solid var(--line2);border-radius:9px}
 </style>
@@ -3278,7 +3296,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.57 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.58 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4553,9 +4571,41 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     return String(Math.round(v));
   }
 
+
+  /* ---------- 每卡实时价：跟随输入窗口当前股票，tick 同步刷新 ---------- */
+  function cardPriceBadge() {
+    if (!metrics || metrics.price == null) return null;
+    var pct = metrics.changePct;
+    return {
+      text: "现价 " + Number(metrics.price).toFixed(2) + (pct == null ? "" : " " + (pct >= 0 ? "+" : "") + Number(pct).toFixed(2) + "%"),
+      cls: pct > 0 ? "up" : pct < 0 ? "down" : "flat"
+    };
+  }
+  function putBadge(host, badge, after) {
+    if (!host) return;
+    var b = host.querySelector(".cardpx");
+    if (!b) {
+      b = document.createElement("span");
+      if (after && after.nextSibling) host.insertBefore(b, after.nextSibling); else host.appendChild(b);
+    }
+    b.className = "cardpx" + (badge ? " " + badge.cls : "");
+    b.textContent = badge ? badge.text : "现价 --";
+  }
+  function paintCardPrices() {
+    var badge = cardPriceBadge();
+    Array.prototype.slice.call(document.querySelectorAll(".card-title")).forEach(function (t) {
+      putBadge(t, badge, t.querySelector("b"));
+    });
+    var qc = document.getElementById("quoteCard");
+    if (qc) putBadge(qc.querySelector(".head"), badge, null);
+    var cb = document.querySelector(".codebar");
+    if (cb) putBadge(cb, badge, null);
+  }
+
   function render(m, points) {
     var phase = C.marketPhase(new Date(), st.code);
     $("phase").textContent = C.phaseText(phase);
+    try { paintCardPrices(); } catch (e) { /* 徽标失败不阻塞 */ }
     var rawName = (parsed && parsed.quote.name) || "";
     var nameNow = /\uFFFD/.test(rawName) ? "" : rawName;   // 编码异常时不显示名字
     $("name").textContent = (nameNow ? nameNow + " " : "") + C.displayCode(st.code);
@@ -5332,6 +5382,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (st.watch.length > 8) st.watch = st.watch.slice(0, 8);
     save({ code: st.code, watch: st.watch });
     parsed = null; metrics = null; metricsCode = ""; lastActive = {}; alertQueue = []; renderAlert();
+    try { paintCardPrices(); } catch (e) {}
     try { renderBurstCard(); } catch (e) {}
     $("codeInput").value = C.displayCode(code);
     renderChips(); renderPlanSummary(); bindPosInputs();

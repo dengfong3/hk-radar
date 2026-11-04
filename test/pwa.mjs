@@ -1575,5 +1575,13 @@ ok("简报空仓分支", rep2.includes("建仓建议") && rep2.includes("不建�
 ok("页面接入简报渲染", html.includes("function renderAnalysisCard") && html.includes("buildAnalysisReport"));
 
 
+
+/* ---------- 57) 每卡实时价（保持 v0.54 单列排版） ---------- */
+console.log("\n[每卡实时价]");
+ok("页面含每卡实时价逻辑", html.includes("paintCardPrices") && html.includes("cardPriceBadge"));
+ok("每卡实时价样式", html.includes(".cardpx") && html.includes(".cardpx.up") && html.includes(".cardpx.down"));
+ok("保持 v0.54 单列（无网格重排）", !html.includes("buildCardGrid") && !html.includes("grid-template-columns:1fr 1fr"));
+ok("徽标跟随切换重置", (html.match(/paintCardPrices\(\); \} catch/g) || []).length >= 2);
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
