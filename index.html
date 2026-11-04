@@ -276,6 +276,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     <input id="aiKey" type="password" placeholder="DeepSeek API Key（仅存本机，sk-...）" autocomplete="off">
     <input id="aiModel" class="aimodel" placeholder="deepseek-v4.1-flash" autocomplete="off">
     <button class="btn" id="aiGen">生成 AI 分析</button>
+    <button class="btn" id="aiTest">测试连接</button>
     <button class="btn" id="aiClearKey">清除</button>
     <label class="ailbl"><input type="checkbox" id="aiAuto" checked>自动15分钟</label>
   </div>
@@ -3357,7 +3358,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.67 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.68 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3708,12 +3709,19 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     try { var o = JSON.parse(t); if (o && typeof o === "object") return o; } catch (e) {}
     return null;
   }
+  function maskKey(k) {
+    var v = String(k || "");
+    if (!v) return "";
+    if (v.length <= 12) return v.slice(0, 3) + "…" + v.slice(-2);
+    return v.slice(0, 6) + "…" + v.slice(-4);
+  }
   function callDeepSeek(ctx) {
     var key = String(st.aiKey || "").trim();
-    if (!key) return Promise.reject(new Error("请先在「实时分析简报」卡里填 DeepSeek API Key"));
+    if (!key) return Promise.reject(new Error("请先填 DeepSeek API Key"));
     var model = String(st.aiModel || "deepseek-v4.1-flash").trim();
     var user = "请基于以下实时数据，对全部卡片做一次深度分析（json 输入）：\n" + JSON.stringify(ctx);
     function once(mdl) {
+      var t0 = Date.now();
       return fetch("https://api.deepseek.com/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
@@ -3723,6 +3731,53 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         })
       }).then(function (r) {
         return r.text().then(function (t) {
+          var latencyMs = Date.now() - t0;
+          var j = null;
+          try { j = JSON.parse(t); } catch (e) {}
+          if (!r.ok) {
+            var msg = (j && j.error && j.error.message) || t.slice(0, 200) || ("HTTP " + r.status);
+            var err = new Error(msg);
+            err.status = r.status; err.body = String(t).slice(0, 300);
+            throw err;
+          }
+          var c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+          if (!c) throw new Error("AI 返回为空");
+          var cards = parseAICards(c);
+          return {
+            cards: cards || { brief: String(c).trim() }, raw: String(c).trim(), model: mdl,
+            apiModel: (j && j.model) || mdl, usage: (j && j.usage) || null,
+            httpStatus: r.status, latencyMs: latencyMs, keyMask: maskKey(key)
+          };
+        });
+      });
+    }
+    return once(model).catch(function (e) {
+      if (e && (e.status === 400 || e.status === 404) && /model/i.test(String(e.message))) return once("deepseek-chat");
+      throw e;
+    });
+  }
+  var aiTesting = false;
+  function testAIKey() {
+    var key = String(st.aiKey || "").trim();
+    var note = $("aiTopNote"), stt = $("aiTopStatus");
+    if (!key) { if (note) note.textContent = "⚠ 未配置 Key：请先在上方输入框填写 Key，点一下别处保存后再测试。"; return; }
+    if (aiTesting) return;
+    aiTesting = true;
+    if (stt) stt.textContent = "测试中…";
+    if (note) note.textContent = "正在测试连接（Key " + maskKey(key) + "）…";
+    var model = String(st.aiModel || "deepseek-v4.1-flash").trim();
+    function once(mdl) {
+      var t0 = Date.now();
+      return fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+        body: JSON.stringify({
+          model: mdl, temperature: 0, max_tokens: 4,
+          messages: [{ role: "user", content: "请只回复 ok" }]
+        })
+      }).then(function (r) {
+        return r.text().then(function (t) {
+          var latencyMs = Date.now() - t0;
           var j = null;
           try { j = JSON.parse(t); } catch (e) {}
           if (!r.ok) {
@@ -3730,15 +3785,30 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
             var err = new Error(msg); err.status = r.status; throw err;
           }
           var c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
-          if (!c) throw new Error("AI 返回为空");
-          var cards = parseAICards(c);
-          return { cards: cards || { brief: String(c).trim() }, raw: String(c).trim(), model: mdl };
+          if (!c) throw new Error("返回为空");
+          return { reply: String(c).trim(), apiModel: (j && j.model) || mdl, usage: (j && j.usage) || null, httpStatus: r.status, latencyMs: latencyMs };
         });
       });
     }
-    return once(model).catch(function (e) {
+    once(model).catch(function (e) {
       if (e && (e.status === 400 || e.status === 404) && /model/i.test(String(e.message))) return once("deepseek-chat");
       throw e;
+    }).then(function (res) {
+      aiTesting = false;
+      var tok = res.usage && res.usage.total_tokens != null ? res.usage.total_tokens : "?";
+      if (stt) stt.textContent = "连接成功";
+      if (note) note.textContent = "✅ 连接成功：HTTP " + res.httpStatus + " · 模型 " + res.apiModel +
+        " · tokens " + tok + " · 耗时 " + res.latencyMs + "ms · Key " + maskKey(key) +
+        "。若后台仍无记录：请核对后台「API Key」筛选项是否就是这个 Key，或查看「全部 API Key」/账单页。";
+      st.aiLastTest = { at: Date.now(), ok: true, model: res.apiModel, usage: res.usage, ms: res.latencyMs, httpStatus: res.httpStatus };
+      try { save({ aiLastTest: st.aiLastTest }); } catch (e) {}
+    }).catch(function (e) {
+      aiTesting = false;
+      if (stt) stt.textContent = "连接失败";
+      if (note) note.textContent = "❌ 连接失败：" + (e && e.message ? e.message : e) +
+        "（HTTP " + (e && e.status != null ? e.status : "?") + " · Key " + maskKey(key) + "）；请检查 Key 是否有效、账户是否欠费、网络是否可访问 api.deepseek.com。";
+      st.aiLastTest = { at: Date.now(), ok: false, err: String(e && e.message ? e.message : e) };
+      try { save({ aiLastTest: st.aiLastTest }); } catch (e2) {}
     });
   }
   var AI_CARD_MAP = [
@@ -3840,7 +3910,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       .then(function (res) {
         st.aiAt = Date.now(); st.aiCode = st.code; st.aiCards = res.cards;
         st.aiText = res.cards.brief || res.raw || ""; st.aiModelUsed = res.model;
-        try { save({ aiAt: st.aiAt, aiCode: st.aiCode, aiCards: st.aiCards, aiText: st.aiText, aiModelUsed: st.aiModelUsed }); } catch (e) {}
+        st.aiUsage = res.usage || null; st.aiApiModel = res.apiModel || res.model;
+        st.aiHttpStatus = res.httpStatus || 200; st.aiLatencyMs = res.latencyMs || null;
+        try { save({ aiAt: st.aiAt, aiCode: st.aiCode, aiCards: st.aiCards, aiText: st.aiText, aiModelUsed: st.aiModelUsed,
+          aiUsage: st.aiUsage, aiApiModel: st.aiApiModel, aiHttpStatus: st.aiHttpStatus, aiLatencyMs: st.aiLatencyMs }); } catch (e) {}
         var txt = st.aiText + (res.cards.risk ? "\n\n风险提示：" + res.cards.risk : "");
         if (out) out.textContent = txt;
         var ts = new Date();
@@ -3884,8 +3957,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (stt) stt.textContent = aiBusy ? "分析中…" : has ? (last || "已配置") : "普通模式";
     if (note) {
       if (aiBusy) note.textContent = "🤖 AI 正在分析全部卡片，请稍候…";
-      else if (has) note.textContent = "已配置大模型 Key：点「生成 AI 分析」或自动每 15 分钟，各卡片会追加 AI 深度解读。";
-      else note.textContent = "未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。";
+      else if (has) {
+        var extra = "";
+        if (st.aiApiModel) extra += " · 上次模型 " + st.aiApiModel;
+        if (st.aiUsage && st.aiUsage.total_tokens != null) extra += " · tokens " + st.aiUsage.total_tokens;
+        else if (st.aiUsage && st.aiUsage.prompt_tokens != null) extra += " · tokens " + ((st.aiUsage.prompt_tokens || 0) + (st.aiUsage.completion_tokens || 0));
+        note.textContent = "已配置 Key（" + maskKey(String(st.aiKey)) + "）" + extra +
+          "；点「生成 AI 分析」或自动每 15 分钟。若后台无记录，请核对后台 API Key 是否与此 Key 一致。";
+      } else note.textContent = "未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。";
     }
   }
   function initAIFab() {
@@ -3948,6 +4027,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (a) a.addEventListener("change", function () { st.aiAuto = !!a.checked; save({ aiAuto: st.aiAuto }); });
     var g = $("aiGen");
     if (g) g.addEventListener("click", function () { generateAIBrief(true); });
+    var tt = $("aiTest");
+    if (tt) tt.addEventListener("click", function () { testAIKey(); });
     var ck = $("aiClearKey");
     if (ck) ck.addEventListener("click", function () {
       if (!confirm("确定清除本机保存的 DeepSeek Key？清除后回到机器简报模式。")) return;

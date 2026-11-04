@@ -1644,5 +1644,14 @@ ok("自动15分钟复选框不再套用输入框样式", html.includes('input:no
 ok("标签行内对齐", html.includes("display:inline-flex;align-items:center;gap:4px"));
 ok("观察池只保留近 3 天", html.includes("prunePools(3)") && html.includes("slice(-keep)") && html.includes("近 3 天"));
 
+
+/* ---------- 65) AI 调用诊断 ---------- */
+console.log("\n[AI 调用诊断]");
+ok("测试连接按钮", html.includes('id="aiTest"') && html.includes("function testAIKey"));
+ok("显示 Key 掩码", html.includes("function maskKey") && html.includes("maskKey(String(st.aiKey))"));
+ok("记录 tokens 与真实模型", html.includes("aiUsage") && html.includes("aiApiModel") && html.includes("usage"));
+ok("测试结果含 HTTP/模型/tokens/耗时", html.includes("连接成功：HTTP") && html.includes("tokens") && html.includes("耗时"));
+ok("失败提示含状态与排查建议", html.includes("连接失败") && html.includes("账户是否欠费"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
