@@ -1575,19 +1575,5 @@ ok("简报空仓分支", rep2.includes("建仓建议") && rep2.includes("不建�
 ok("页面接入简报渲染", html.includes("function renderAnalysisCard") && html.includes("buildAnalysisReport"));
 
 
-/* ---------- 56) 卡片网格重排 + 每卡实时价 ---------- */
-console.log("\n[卡片排版]");
-ok("页面含网格/折叠/实时价逻辑", html.includes("buildCardGrid") && html.includes("initCardFolds") && html.includes("paintCardPrices"));
-ok("桌面双列网格 CSS", html.includes("grid-template-columns:1fr 1fr"));
-ok("卡片实时价样式存在", html.includes(".cardpx") && html.includes(".cardpx.up") && html.includes(".cardpx.down"));
-const orderMatch = /var CARD_ORDER = \[([\s\S]*?)\];/.exec(html);
-ok("卡片顺序数组存在", !!orderMatch);
-if (orderMatch) {
-  const order = orderMatch[1];
-  ok("简报排在智能信号之前", order.indexOf("15 分钟分析简报") > 0 && order.indexOf("15 分钟分析简报") < order.indexOf("智能信号"));
-  ok("行情/多股/简报为整行卡片", html.includes('id="quoteCard"') && html.includes('class="card full" id="multiCard"'));
-}
-ok("折叠状态持久化", html.includes("cardFolded"));
-
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -31,7 +31,7 @@ body{padding:10px 10px calc(20px + var(--safe-b));max-width:560px;margin:0 auto;
 .tb.on{background:#0f2740;border-color:var(--accent);color:#bae6fd}
 .tb.danger{background:#7f1d1d;border-color:var(--danger);color:#fff}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px;margin-bottom:9px}
-.card-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-bottom:7px}
+.card-title{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);margin-bottom:7px}
 .card-title b{color:var(--txt);font-size:13px}
 .card-title .sp{flex:1 1 auto}
 .mini{min-height:30px;font-size:12px;border:1px solid var(--line);background:var(--card2);color:#c7d2e0;
@@ -196,30 +196,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   color:var(--txt);font-size:14px}
 .fbtns button.primary{background:#1f3a5f;border-color:var(--accent);color:#dbeafe;font-weight:700}
 
-/* ===== 卡片网格重排 + 每卡实时价 ===== */
-.cardgrid{display:block}
-.cardpx{font-size:10px;font-weight:700;color:var(--txt);white-space:nowrap;margin-left:2px;
-  border:1px solid var(--line);border-radius:7px;padding:0 5px;background:var(--card2)}
-.cardpx.up{color:var(--up);border-color:rgba(248,113,113,.35)}
-.cardpx.down{color:var(--down);border-color:rgba(74,222,128,.35)}
-.cardpx.flat{color:var(--txt)}
-.card-title{cursor:pointer}
-.card-title .foldhint{font-size:10px;color:var(--dim2);margin-left:4px}
-.card.folded > *:not(.card-title){display:none}
-.card.folded > .card-title{margin-bottom:0}
-.card.folded > .card-title b::after{content:"（已折叠，点标题展开）";font-weight:400;color:var(--dim2);font-size:10px;margin-left:6px}
-@media(max-width:560px){
-  .card-title > span[id$="Meta"]{flex:1 0 100%;margin-left:0;font-size:9.5px;color:var(--dim2)}
-  .card-title > span[id$="Unit"]{flex:1 0 100%;margin-left:0}
-}
-@media(min-width:1000px){
-  body{max-width:1280px;padding:14px 16px calc(20px + var(--safe-b))}
-  .cardgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
-  .cardgrid .card{margin:0}
-  .cardgrid .card.full{grid-column:1/-1}
-  .cardgrid #anaBox pre{max-width:980px}
-}
-
 .disclaimer{font-size:10px;color:var(--dim2);line-height:1.7;margin-top:10px;padding:9px;
   border:1px solid var(--line2);border-radius:9px}
 </style>
@@ -233,7 +209,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <button class="tb" id="btnEvent" title="重大利空开关：确认后所有价格规则让位，直接清仓">⚠</button>
 </div>
 
-<div class="card codebar full">
+<div class="card codebar">
   <input id="codeInput" inputmode="text" autocomplete="off" autocapitalize="characters"
          placeholder="代码 / 名称 / 拼音首字母（如 宁德时代、ndsd）" aria-label="股票代码">
   <button id="btnSwitch">切换</button>
@@ -242,12 +218,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="card-title"><b>自选</b></div>
   <div class="chips" id="chips"></div>
 </div>
-<div class="card full" id="multiCard" style="display:none">
+<div class="card" id="multiCard" style="display:none">
   <div class="card-title"><b>多股监控（自选实时）</b><span class="sp"></span><span id="multiMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="multiBox"></div>
 </div>
 
-<div class="card full" id="quoteCard">
+<div class="card" id="quoteCard">
   <div class="head">
     <div class="name" id="name">—</div>
     <div class="phase" id="phase">—</div>
@@ -301,7 +277,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="sigbox" id="entryBox"></div>
 </div>
 
-<div class="card full">
+<div class="card">
   <div class="card-title"><b>15 分钟分析简报</b><span class="sp"></span><span id="anaMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="anaBox"></div>
 </div>
@@ -321,17 +297,17 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="sigbox" id="macroBox"></div>
 </div>
 
-<div class="card full">
+<div class="card">
   <div class="card-title"><b>14:50 尾盘观察池</b><span class="sp"></span><span id="poolMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="poolBox"></div>
 </div>
 
-<div class="card full">
+<div class="card">
   <div class="card-title"><b>每日简报</b><span class="sp"></span><span id="briefMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="briefBox"></div>
 </div>
 
-<div class="card full">
+<div class="card">
   <div class="card-title"><b>信号台账</b><span class="sp"></span><span id="ledgerMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="ledgerBox"></div>
 </div>
@@ -366,7 +342,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="planbox" id="planSummary">未设置。点「编辑」填入你自己的减仓档与止损线——**本工具不会给你预设买卖点**。</div>
 </div>
 
-<div class="card full">
+<div class="card">
   <div class="card-title"><b>本机数据（自动保存）</b><span class="sp"></span><span id="localMeta" style="font-size:10px"></span></div>
   <div class="sigbox" id="localBox"></div>
   <input type="file" id="backupFile" accept=".json,application/json" style="display:none">
@@ -3302,7 +3278,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.56 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.57 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4577,84 +4553,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     return String(Math.round(v));
   }
 
-  /* ---------- 卡片网格重排 + 折叠 + 每卡实时价 ---------- */
-  var CARD_ORDER = [
-    "codebar", "自选", "行情", "15 分钟分析简报", "智能信号", "盘中异动（敏捷信号）",
-    "建仓建议（空仓时）", "多股监控（自选实时）", "下一步买卖点", "日内参考位", "多周期节奏",
-    "建仓验证（回测）", "洗盘 / 出货检测", "日线 / 盘口 / 大盘", "14:50 尾盘观察池",
-    "每日简报", "信号台账", "信号", "持仓（本机保存）", "交易计划（本机）", "本机数据（自动保存）"
-  ];
-  function cardKey(card) {
-    if (!card) return "";
-    if (card.classList && card.classList.contains("codebar")) return "codebar";
-    if (card.id === "quoteCard") return "行情";
-    if (card.id === "multiCard") return "多股监控（自选实时）";
-    if (card.id) return card.id;
-    var b = card.querySelector(".card-title b");
-    return b ? b.textContent.trim() : "";
-  }
-  function buildCardGrid() {
-    if (document.getElementById("cardGrid")) return;
-    var topbar = document.querySelector(".topbar");
-    if (!topbar || !topbar.parentNode) return;
-    var grid = document.createElement("div");
-    grid.id = "cardGrid"; grid.className = "cardgrid";
-    topbar.parentNode.insertBefore(grid, topbar.nextSibling);
-    var cards = Array.prototype.slice.call(document.querySelectorAll(".card"));
-    var map = {};
-    cards.forEach(function (c) {
-      var k = cardKey(c);
-      if (!k) return;
-      if (!map[k]) map[k] = [];
-      map[k].push(c);
-    });
-    CARD_ORDER.forEach(function (k) {
-      var arr = map[k];
-      if (!arr) return;
-      arr.forEach(function (c) { grid.appendChild(c); });
-      delete map[k];
-    });
-    Object.keys(map).forEach(function (k) {
-      map[k].forEach(function (c) { grid.appendChild(c); });
-    });
-  }
-  function initCardFolds() {
-    var folded = st.cardFolded || (st.cardFolded = {});
-    Array.prototype.slice.call(document.querySelectorAll("#cardGrid .card")).forEach(function (card) {
-      if (card.id === "quoteCard") return;          // 行情卡保持展开
-      var title = card.querySelector(".card-title");
-      if (!title) return;
-      var key = cardKey(card) || card.id || "";
-      function applyFold() {
-        card.classList.toggle("folded", !!folded[key]);
-      }
-      applyFold();
-      title.addEventListener("click", function (ev) {
-        if (ev && ev.target && ev.target.closest && ev.target.closest("button,a,input")) return;
-        folded[key] = !folded[key];
-        save({ cardFolded: folded });
-        applyFold();
-      });
-    });
-  }
-  function paintCardPrices() {
-    if (!metrics || metrics.price == null) return;
-    var pct = metrics.changePct;
-    var cls = pct > 0 ? "up" : pct < 0 ? "down" : "flat";
-    var txt = "现价 " + Number(metrics.price).toFixed(2) + (pct == null ? "" : " " + (pct >= 0 ? "+" : "") + Number(pct).toFixed(2) + "%");
-    Array.prototype.slice.call(document.querySelectorAll("#cardGrid .card-title")).forEach(function (t) {
-      var bEl = t.querySelector("b");
-      if (!bEl) return;
-      var b = t.querySelector(".cardpx");
-      if (!b) {
-        b = document.createElement("span");
-        if (bEl.nextSibling) t.insertBefore(b, bEl.nextSibling); else t.appendChild(b);
-      }
-      b.className = "cardpx " + cls;
-      b.textContent = txt;
-    });
-  }
-
   function render(m, points) {
     var phase = C.marketPhase(new Date(), st.code);
     $("phase").textContent = C.phaseText(phase);
@@ -5302,7 +5200,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           fetchOrderBook(st.code).then(function (ob) { if (ob) orderData = ob; }).catch(function () {});
         }
         render(metrics, p.points);
-        try { paintCardPrices(); } catch (e) {}
         try { renderSignalCard(); } catch (e) { /* 指标不足时不阻塞行情 */ }
         try { renderBurstCard(); } catch (e) { /* 敏捷信号失败不阻塞 */ }
         try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
@@ -5646,8 +5543,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   $("codeInput").value = C.displayCode(st.code);
   renderChips(); renderPlanSummary(); bindPosInputs();
   try { fetchWatchNames(); } catch (e) {}
-  try { buildCardGrid(); } catch (e) {}
-  try { initCardFolds(); } catch (e) {}
   try { renderMultiCard(); fetchMultiLive(); } catch (e) {}
   try { renderLocalCard(); } catch (e) {}
   try { renderBurstCard(); } catch (e) {}
