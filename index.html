@@ -214,8 +214,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
 
-#aiTopCard{position:sticky;top:0;z-index:85;margin:0 0 9px;padding:8px 10px;border-radius:10px;
-  background:rgba(17,26,43,.985);border:1px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.45)}
+#aiTopCard{margin:0 0 9px;padding:8px 10px;border-radius:10px;
+  background:rgba(17,26,43,.985);border:1px solid var(--line)}
 #aiTopCard .aihead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 #aiTopCard .aihead b{font-size:12.5px}
 #aiTopCard #aiTopStatus{font-size:10px;margin-left:auto;color:var(--dim);border:1px solid var(--line);
@@ -231,6 +231,18 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 #aiTopCard .airow button:hover{border-color:var(--accent)}
 #aiTopCard .ailbl{font-size:10.5px;color:var(--dim);white-space:nowrap}
 #aiTopCard .ainote{font-size:10.5px;line-height:1.45;margin-top:5px;color:#fcd34d}
+#aiFab{position:fixed;right:14px;bottom:calc(16px + var(--safe-b));z-index:70;width:46px;height:46px;
+  border-radius:50%;background:#16213a;border:1px solid var(--accent);color:#dbeafe;font-size:21px;
+  display:none;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.5);cursor:pointer}
+#aiFab.on{display:flex}
+#aiFabMenu{position:fixed;right:14px;bottom:calc(72px + var(--safe-b));z-index:71;display:none;
+  flex-direction:column;gap:6px;min-width:150px;background:var(--card);border:1px solid var(--line);
+  border-radius:10px;padding:8px;box-shadow:0 10px 26px rgba(0,0,0,.5)}
+#aiFabMenu.on{display:flex}
+#aiFabMenu .fabtitle{font-size:10.5px;color:var(--dim2);padding:0 2px 2px}
+#aiFabMenu button{border:1px solid var(--line);background:var(--card2);color:var(--txt);border-radius:8px;
+  font-size:12px;padding:6px 9px;cursor:pointer;text-align:left}
+#aiFabMenu button:hover{border-color:var(--accent)}
 #aiTopCard.ok .ainote{color:#86efac}
 #aiTopCard.busy .ainote{color:#7dd3fc}
 @media(max-width:560px){
@@ -265,9 +277,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     <button class="btn" id="aiGen">生成 AI 分析</button>
     <button class="btn" id="aiClearKey">清除</button>
     <label class="ailbl"><input type="checkbox" id="aiAuto" checked>自动15分钟</label>
-    <span id="aiStatus" style="font-size:10px;color:#8b9ab1"></span>
   </div>
   <div class="ainote" id="aiTopNote">未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。</div>
+</div>
+<div id="aiFab" title="AI 分析（生成 / 配置）">🤖</div>
+<div id="aiFabMenu">
+  <div class="fabtitle">AI 深度分析</div>
+  <button id="fabGen">生成 AI 分析</button>
+  <button id="fabCfg">配置 Key</button>
+  <button id="fabTop">回到 AI 卡</button>
 </div>
 
 <div class="card codebar">
@@ -3338,7 +3356,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.64 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.65 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3782,7 +3800,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   function generateAIBrief(manual) {
     if (aiBusy) return;
     var key = String(st.aiKey || "").trim();
-    var status = $("aiStatus"), out = $("aiOut"), hint = $("aiOutHint");
+    var status = null, out = $("aiOut"), hint = $("aiOutHint");
     if (!key) {
       if (hint) { hint.style.display = ""; hint.textContent = "⚠ 未配置 DeepSeek API Key：请在下方输入（只保存在本机浏览器；建议使用限额 Key）。"; }
       if (status) status.textContent = "未配置 Key";
@@ -3850,6 +3868,44 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       else note.textContent = "未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。";
     }
   }
+  function initAIFab() {
+    var fab = $("aiFab"), menu = $("aiFabMenu");
+    if (!fab || !menu) return;
+    function closeMenu() { menu.classList.remove("on"); }
+    fab.addEventListener("click", function (ev) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      menu.classList.toggle("on");
+    });
+    document.addEventListener("click", function (ev) {
+      if (!menu.classList.contains("on")) return;
+      if (menu.contains && menu.contains(ev.target)) return;
+      if (fab === ev.target) return;
+      closeMenu();
+    });
+    var g = $("fabGen"); if (g) g.addEventListener("click", function () { closeMenu(); generateAIBrief(true); });
+    var c = $("fabCfg"); if (c) c.addEventListener("click", function () { closeMenu(); openAIConfig(); });
+    var t = $("fabTop");
+    if (t) t.addEventListener("click", function () {
+      closeMenu();
+      var card = $("aiTopCard");
+      if (card) { try { card.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {} }
+    });
+    function updateFab() {
+      var card = $("aiTopCard");
+      var r = card && card.getBoundingClientRect ? card.getBoundingClientRect() : null;
+      var past = !r || r.bottom < 4;          // 已滚过 AI 卡：显示悬浮入口
+      fab.classList.toggle("on", past);
+      if (!past) closeMenu();
+    }
+    var lastY = 0, ticking = false;
+    window.addEventListener("scroll", function () {
+      if (ticking) return;
+      ticking = true;
+      setTimeout(function () { ticking = false; updateFab(); }, 120);
+    }, { passive: true });
+    window.addEventListener("resize", updateFab);
+    updateFab();
+  }
   function hasAIKey() { return !!(st.aiKey && String(st.aiKey).trim()); }
   function applyAIMode() {
     var has = hasAIKey();
@@ -3882,13 +3938,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     try { updateAITop(); } catch (e) {}
     var out = $("aiOut");
     if (out && st.aiText && st.aiCode === st.code) out.textContent = st.aiText;
-    var st2 = $("aiStatus");
-    if (st2 && st.aiAt) {
-      var d = new Date(st.aiAt);
-      var hh = d.getHours() < 10 ? "0" + d.getHours() : d.getHours();
-      var mm = d.getMinutes() < 10 ? "0" + d.getMinutes() : d.getMinutes();
-      st2.textContent = "上次 AI " + hh + ":" + mm + (st.aiModelUsed ? " · " + st.aiModelUsed : "");
-    }
   }
 
   /* ---------- 智能信号（共识评分）与信号台账 ---------- */
@@ -5842,7 +5891,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     save({ code: st.code, watch: st.watch });
     parsed = null; metrics = null; metricsCode = ""; lastActive = {}; alertQueue = []; renderAlert();
     try { paintCardPrices(); } catch (e) {}
-    try { st.aiCode = ""; var _ao = $("aiOut"); if (_ao) _ao.textContent = ""; if ($("aiStatus")) $("aiStatus").textContent = ""; } catch (e) {}
+    try { st.aiCode = ""; var _ao = $("aiOut"); if (_ao) _ao.textContent = ""; } catch (e) {}
     try { renderBurstCard(); } catch (e) {}
     $("codeInput").value = C.displayCode(code);
     renderChips(); renderPlanSummary(); bindPosInputs();
@@ -6058,6 +6107,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   try { renderEntryCard(); } catch (e) {}
   try { renderEntryTrackCard(); } catch (e) {}
   try { initAISettings(); } catch (e) {}
+  try { initAIFab(); } catch (e) {}
   tick(false);
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(function () { /* 线上需要 https 才注册 */ });

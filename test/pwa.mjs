@@ -1615,7 +1615,7 @@ ok("每日简报卡片已删除", !html.includes("<b>每日简报</b>"));
 
 /* ---------- 61) 置顶 AI 提示条 + 简版提示 ---------- */
 console.log("\n[置顶提示]");
-ok("顶部置顶 AI 输入卡", html.includes('id="aiTopCard"') && html.includes("position:sticky") && html.includes("updateAITop"));
+ok("顶部 AI 输入卡（非吸顶，滚动不挡内容）", html.includes('id="aiTopCard"') && html.includes("updateAITop") && !html.includes("#aiTopCard{position:sticky"));
 ok("未配置时只显示简版提示", html.includes("当前只显示<b>简版提示</b>") && html.includes("显示机器简报"));
 ok("置顶卡有 Key/模型/生成/清除", html.includes('id="aiKey"') && html.includes('id="aiModel"') && html.includes('id="aiGen"') && html.includes('id="aiClearKey"'));
 ok("配置弹到简报卡", html.includes("openAIConfig") && html.includes("scrollIntoView"));
@@ -1628,6 +1628,14 @@ ok("简报卡可复制 AI 简报", html.includes("anaAICopy"));
 ok("有 Key 时 AI 简报为主、机器摘要可折叠", html.includes("机器摘要（规则版，供核对）") && html.includes("anaRuleToggle"));
 ok("各卡片 AI 解读置顶", html.includes("AI_CARD_MAP") && html.includes("insertBefore(note, box.firstChild"));
 ok("规则明细默认折叠", html.includes("airulehide") && html.includes("显示规则明细"));
+
+
+/* ---------- 63) 滚动不遮挡：AI 卡非吸顶 + 悬浮入口 ---------- */
+console.log("\n[滚动不遮挡]");
+ok("AI 卡已取消吸顶", !html.includes("#aiTopCard{position:sticky") && !html.includes("top:0;z-index:85"));
+ok("提供悬浮 AI 入口", html.includes('id="aiFab"') && html.includes("initAIFab"));
+ok("悬浮菜单含生成/配置/回到AI卡", html.includes('id="fabGen"') && html.includes('id="fabCfg"') && html.includes('id="fabTop"'));
+ok("滚过 AI 卡才显示悬浮按钮", html.includes("getBoundingClientRect") && html.includes("aiFab"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
