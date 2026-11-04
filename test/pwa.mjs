@@ -1596,9 +1596,9 @@ ok("Key 只存本机", html.includes("st.aiKey") && html.includes("只保存在�
 /* ---------- 59) 无 Key 时回退到上一版机器简报 ---------- */
 console.log("\n[AI 回退模式]");
 ok("AI 设置区可折叠", html.includes('id="aiSetup"') && html.includes("applyAIMode"));
-ok("无 Key 提示与配置按钮", html.includes("未配置 DeepSeek API Key") && html.includes("aiSetupToggle"));
+ok("无 Key 提示与配置按钮", html.includes("未配置 DeepSeek API Key") && html.includes("aiBannerCfg"));
 ok("无 Key 时用机器简报（上一版方式）", html.includes("机器简报（规则版") && html.includes("等同上一版方式"));
-ok("无 Key 时有立即生成/复制全文", html.includes('id="anaNow"') && html.includes('id="anaCopy"'));
+ok("无 Key 时只有简版提示（可展开机器简报）", html.includes("anaConfig") && html.includes("anaShowMachine") && html.includes("anaCopy"));
 ok("有 Key 才显示 AI 输出", html.includes("hasAIKey") && html.includes("out.style.display = has ? \"\" : \"none\""));
 
 
@@ -1611,6 +1611,14 @@ ok("备份导出剔除 Key", html.includes("delete safe.aiKey") && html.includes
 ok("导入不会带别人的 Key", html.includes("var keepKey = st.aiKey"));
 ok("可清除本机 Key", html.includes("aiClearKey") && html.includes("清除本机保存的 DeepSeek Key"));
 ok("每日简报卡片已删除", !html.includes("<b>每日简报</b>"));
+
+
+/* ---------- 61) 置顶 AI 提示条 + 简版提示 ---------- */
+console.log("\n[置顶提示]");
+ok("顶部置顶提示条", html.includes('id="aiBanner"') && html.includes("position:sticky") && html.includes("renderAIBanner"));
+ok("未配置时只显示简版提示", html.includes("当前只显示<b>简版提示</b>") && html.includes("显示机器简报"));
+ok("置顶条有配置/生成按钮", html.includes("aiBannerCfg") && html.includes("aiBannerGen") && html.includes("aiBannerMachine"));
+ok("配置弹到简报卡", html.includes("openAIConfig") && html.includes("scrollIntoView"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

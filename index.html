@@ -214,6 +214,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
 
+#aiBanner{position:sticky;top:0;z-index:80;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+  margin:0 0 9px;padding:7px 10px;border-radius:10px;font-size:11.5px;line-height:1.45;
+  background:#2a1f0a;border:1px solid #7c5a1a;color:#fcd34d;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+#aiBanner.ok{background:#0e1f1a;border-color:#1f6f5a;color:#a7f3d0}
+#aiBanner.busy{background:#0f2740;border-color:#38bdf8;color:#bae6fd}
+#aiBanner b{font-weight:700}
+#aiBanner .bbtn{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+#aiBanner button{border:1px solid currentColor;background:transparent;color:inherit;border-radius:7px;
+  font-size:10.5px;padding:2px 8px;cursor:pointer;font-weight:600}
+#aiBanner button:hover{background:rgba(255,255,255,.08)}
 .sinote{margin-top:6px;font-size:10.5px;line-height:1.55;color:#a7f3d0;background:#0e1f1a;
   border-left:2px solid #34d399;padding:4px 7px;border-radius:5px;white-space:pre-wrap}
 .disclaimer{font-size:10px;color:var(--dim2);line-height:1.7;margin-top:10px;padding:9px;
@@ -228,6 +238,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <button class="tb on" id="btnSound" title="声音与震动提醒">🔔</button>
   <button class="tb" id="btnEvent" title="重大利空开关：确认后所有价格规则让位，直接清仓">⚠</button>
 </div>
+<div id="aiBanner" style="display:none"></div>
 
 <div class="card codebar">
   <input id="codeInput" inputmode="text" autocomplete="off" autocapitalize="characters"
@@ -3310,7 +3321,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.61 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.62 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3444,13 +3455,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (hasKey) {
       box.innerHTML = '<div class="hint">机器摘要（规则引擎，随行情刷新；AI 深度版见下方）</div>' +
         '<pre style="white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit">' + escHtml(text) + "</pre>";
-    } else {
+    } else if (st.showMachineBrief) {
       box.innerHTML = '<div class="hint">机器简报（规则版，未配置 DeepSeek Key，等同上一版方式）</div>' +
         '<div style="display:flex;gap:6px;margin-bottom:4px">' +
-        '<button class="btn" id="anaNow">立即生成</button><button class="btn" id="anaCopy">复制全文</button></div>' +
+        '<button class="btn" id="anaBack">只看简版</button><button class="btn" id="anaCopy">复制全文</button></div>' +
         '<pre style="white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit">' + escHtml(text) + "</pre>";
-      var bn = box.querySelector("#anaNow");
-      if (bn) bn.addEventListener("click", function () { renderAnalysisCard(true); });
+      var bb = box.querySelector("#anaBack");
+      if (bb) bb.addEventListener("click", function () { st.showMachineBrief = false; save({ showMachineBrief: false }); renderAnalysisCard(true); });
       var bc = box.querySelector("#anaCopy");
       if (bc) bc.addEventListener("click", function () {
         try {
@@ -3459,6 +3470,26 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           setTimeout(function () { bc.textContent = "复制全文"; }, 1200);
         } catch (e) { /* 忽略 */ }
       });
+    } else {
+      var oneLine = "";
+      try {
+        var r1 = (lastRuleCtx && lastRuleCtx.refs && lastRuleCtx.refs.reduce && lastRuleCtx.refs.reduce[0]) || null;
+        var s1 = (lastRuleCtx && lastRuleCtx.refs && lastRuleCtx.refs.add && lastRuleCtx.refs.add[0]) || null;
+        var stopV = null;
+        try { var _pl = lastRuleCtx && lastRuleCtx.plan; if (_pl && _pl.reds && _pl.reds.length) stopV = _pl.reds[0].at; } catch (e) {}
+        oneLine = "现价 " + fmtP(metrics.price) + "（" + pctTxt(metrics.changePct) + "）" +
+          (lastSetup ? " · 评分 " + lastSetup.score + " " + lastSetup.grade + "/" + (lastSetup.side || "none") : "") +
+          (r1 ? " · 压力 " + r1.price : "") + (s1 ? " · 支撑 " + s1.price : "") + (stopV != null ? " · 止损 " + fmtP(stopV) : "");
+        var _pa = (lastRuleCtx && lastRuleCtx.pos) || null;
+        if (_pa && _pa.shares > 0 && _pa.cost > 0) oneLine += " · 持仓浮盈 " + pctTxt((metrics.price / _pa.cost - 1) * 100);
+      } catch (e) {}
+      box.innerHTML = '<div class="hint">未配置 DeepSeek API Key：当前只显示<b>简版提示</b>（配置后可生成「机器摘要 + 全部卡片 AI 深度解读」）。</div>' +
+        '<div class="sigwhy">' + oneLine + "</div>" +
+        '<div class="tradebar"><button id="anaConfig">配置 AI</button><button id="anaShowMachine">显示机器简报</button></div>';
+      var cfgB = box.querySelector("#anaConfig");
+      if (cfgB) cfgB.addEventListener("click", function () { openAIConfig(); });
+      var sm = box.querySelector("#anaShowMachine");
+      if (sm) sm.addEventListener("click", function () { st.showMachineBrief = true; save({ showMachineBrief: true }); renderAnalysisCard(true); });
     }
   }
 
@@ -3688,6 +3719,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (!metrics || metricsCode !== st.code) { if (status) status.textContent = "等待行情…"; return; }
     if (!lastRuleBrief) { try { renderAnalysisCard(true); } catch (e) {} }
     aiBusy = true;
+    try { renderAIBanner(); } catch (e) {}
     if (hint) hint.style.display = "none";
     if (status) status.textContent = "拉取板块/大盘…";
     Promise.all([fetchSectorCtx(st.code), fetchMarketCtx()])
@@ -3707,18 +3739,61 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         if (status) status.textContent = "AI 完成（全部卡片）" + hh + ":" + mm + " · " + res.model;
         if (hint) { hint.style.display = ""; hint.textContent = "AI 已把解读写入各卡片（绿色块）；仅作参考，不构成投资建议。"; }
         try { rerenderForAINotes(); } catch (e) {}
+        try { renderAIBanner(); } catch (e) {}
       })
       .catch(function (e) {
         if (status) status.textContent = "AI 失败";
         if (hint) { hint.style.display = ""; hint.textContent = "⚠ " + (e && e.message ? e.message : e) + "（检查 Key / 网络 / 模型名）"; }
+        try { renderAIBanner(); } catch (e2) {}
       })
-      .then(function () { aiBusy = false; });
+      .then(function () { aiBusy = false; try { renderAIBanner(); } catch (e) {} });
   }
   function maybeAIBrief() {
     if (st.aiAuto === false) return;
     if (!st.aiKey) return;
     if (!metrics || metricsCode !== st.code) return;
     if (st.aiCode !== st.code || !st.aiAt || Date.now() - st.aiAt >= 15 * 60 * 1000) generateAIBrief(false);
+  }
+  function openAIConfig() {
+    st.aiSetupOpen = true; save({ aiSetupOpen: true });
+    try { applyAIMode(); } catch (e) {}
+    var card = $("anaBox") ? $("anaBox").closest(".card") : null;
+    if (card) { try { card.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} }
+    setTimeout(function () { var k = $("aiKey"); if (k) try { k.focus(); } catch (e) {} }, 350);
+  }
+  function renderAIBanner() {
+    var el = $("aiBanner");
+    if (!el) return;
+    var has = hasAIKey();
+    el.style.display = "";
+    if (aiBusy) {
+      el.className = "busy";
+      el.innerHTML = "🤖 <b>AI 正在分析全部卡片…</b><span class='bbtn'></span>";
+      return;
+    }
+    if (!has) {
+      el.className = "";
+      el.innerHTML = "⚠ <b>未配置 DeepSeek API Key</b>：当前只显示简版提示；配置后可生成全卡 AI 深度解读。" +
+        "<span class='bbtn'><button id='aiBannerCfg'>配置 AI</button><button id='aiBannerMachine'>看机器简报</button></span>";
+    } else {
+      el.className = "ok";
+      var last = "";
+      if (st.aiAt) {
+        var d = new Date(st.aiAt);
+        var hh = d.getHours() < 10 ? "0" + d.getHours() : d.getHours();
+        var mm = d.getMinutes() < 10 ? "0" + d.getMinutes() : d.getMinutes();
+        last = " · 上次 " + hh + ":" + mm + (st.aiModelUsed ? "（" + st.aiModelUsed + "）" : "");
+      }
+      el.innerHTML = "🤖 <b>AI 已配置</b>" + last + "<span class='bbtn'><button id='aiBannerGen'>生成 AI 分析</button><button id='aiBannerCfg'>配置</button></span>";
+    }
+    var c1 = el.querySelector("#aiBannerCfg"); if (c1) c1.addEventListener("click", openAIConfig);
+    var g1 = el.querySelector("#aiBannerGen"); if (g1) g1.addEventListener("click", function () { generateAIBrief(true); });
+    var m1 = el.querySelector("#aiBannerMachine"); if (m1) m1.addEventListener("click", function () {
+      st.showMachineBrief = true; save({ showMachineBrief: true });
+      try { renderAnalysisCard(true); } catch (e) {}
+      var card = $("anaBox") ? $("anaBox").closest(".card") : null;
+      if (card) { try { card.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} }
+    });
   }
   function hasAIKey() { return !!(st.aiKey && String(st.aiKey).trim()); }
   function applyAIMode() {
@@ -3727,16 +3802,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (setup) setup.style.display = (has || st.aiSetupOpen) ? "" : "none";
     if (out) out.style.display = has ? "" : "none";
     if (outHint) outHint.style.display = has ? "" : "none";
-    if (!hint) return;
-    if (has) { hint.style.display = "none"; return; }
-    hint.style.display = "";
-    hint.innerHTML = "⚠ 未配置 DeepSeek API Key：当前使用<b>机器简报（规则版，上一版方式）</b>，每 15 分钟自动刷新。" +
-      ' <button class="btn" id="aiSetupToggle" style="padding:1px 7px;font-size:10px">配置 AI</button>';
-    var tg = $("aiSetupToggle");
-    if (tg) tg.addEventListener("click", function () {
-      st.aiSetupOpen = true; save({ aiSetupOpen: true }); applyAIMode();
-      var kk = $("aiKey"); if (kk) kk.focus();
-    });
+    if (hint) hint.style.display = "none";   // 提示统一放在顶部置顶条，避免卡片内重复
+    try { renderAIBanner(); } catch (e) {}
   }
   function initAISettings() {
     var k = $("aiKey"), m = $("aiModel"), a = $("aiAuto");
@@ -3759,6 +3826,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       try { renderAnalysisCard(true); } catch (e) {}
     });
     applyAIMode();
+    try { renderAIBanner(); } catch (e) {}
     var out = $("aiOut");
     if (out && st.aiText && st.aiCode === st.code) out.textContent = st.aiText;
     var st2 = $("aiStatus");
