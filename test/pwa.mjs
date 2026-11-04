@@ -1539,5 +1539,40 @@ ok("尾盘买入 → 不弹窗（T+1）", C.burstAlertGate(gBuy, gMp, gM, { mark
 ok("建仓建议不支持 → 不弹窗", C.burstAlertGate(gBuy, gMp, gM, { market: "cn", now: gNow, ea: { suitable: "no" } }).popup === false);
 ok("页面含分级文案", html.includes("强买点") && html.includes("普通试探买点只在卡片显示"));
 
+
+/* ---------- 55) 15 分钟分析简报 ---------- */
+console.log("\n[15 分钟分析简报]");
+ok("页面含简报卡片", html.includes('id="anaBox"') && html.includes("15 分钟分析简报"));
+const repIn = {
+  code: "sz300750", name: "宁德时代", at: new Date(2026, 10, 4, 14, 7, 3),
+  quote: { prevClose: 249.32, open: 249.32, high: 255, low: 245.5, turnover: 1.2e10 },
+  m: { price: 253.88, changePct: 1.83, vwap: 251.23, vwapDevPct: 1.06 },
+  points: [{ hhmm: "1300", price: 250 }, { hhmm: "1330", price: 252 }, { hhmm: "1400", price: 254 }, { hhmm: "1407", price: 253.88 }],
+  mp: { bias: "强多", score: 3, valid: 3 },
+  daily: { trend: "down", ma20: 256.22, ma60: 320, macd: { bull: false }, kdj: { zone: "mid" }, low20: 216.51, high20: 306.71 },
+  setup: { score: 51, grade: "C", side: "none", vetoes: ["日线趋势向下"] },
+  wash: { ok: true, wash: 3, dist: 0, summary: "洗盘特征 3/5 · 出货特征 0/5 → 倾向洗盘" },
+  plan: {
+    takes: [{ lo: 252.48, hi: 255.52, short: "减 1 档", label: "整数关口 · 建议减 100 股", shares: 100 }],
+    reds: [{ at: 243.05 }], buys: [{ lo: 250.49, hi: 253.51 }]
+  },
+  refs: {
+    reduce: [{ price: 254.00, why: "整数关口" }, { price: 255.00, why: "日内前高" }],
+    add: [{ price: 252.00, why: "整数关口" }, { price: 251.02, why: "当日均价 VWAP" }]
+  },
+  pos: { shares: 300, cost: 241 }, indexPct: 6.35
+};
+const rep = C.buildAnalysisReport(repIn);
+ok("简报含五个章节", ["一、实时", "二、处置建议", "三、关键位", "四、明日规则", "五、一句话"].every((k) => rep.includes(k)));
+ok("简报含实时数据", rep.includes("253.88") && rep.includes("+1.83%"));
+ok("简报持仓分支", rep.includes("持仓 300 股") && rep.includes("减仓档"));
+ok("简报含止损与相对强弱", rep.includes("243.05") && rep.includes("弱于大盘"));
+const rep2 = C.buildAnalysisReport(Object.assign({}, repIn, {
+  pos: { shares: 0, cost: 0 },
+  ea: { verdict: "不建议建仓", vetoes: ["追高"], zones: [{ lo: 250, hi: 252, shares: 0 }], stop: 243.05, target: 255.97, rr: 1.2, rrZone: 2.4, maxShares: 0 }
+}));
+ok("简报空仓分支", rep2.includes("建仓建议") && rep2.includes("不建议建仓"));
+ok("页面接入简报渲染", html.includes("function renderAnalysisCard") && html.includes("buildAnalysisReport"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
