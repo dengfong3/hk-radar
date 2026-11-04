@@ -232,6 +232,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 #aiTopCard .ailbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap}
 #aiTopCard .ailbl input[type="checkbox"]{width:14px;height:14px;flex:0 0 auto;margin:0;padding:0;accent-color:var(--accent)}
 #aiTopCard .ainote{font-size:10.5px;line-height:1.45;margin-top:5px;color:#fcd34d}
+#aiTopCard .aistats{font-size:10.5px;line-height:1.5;margin-top:4px;color:var(--dim2)}
+#aiTopCard .aistats button{border:1px solid var(--line);background:var(--card2);color:var(--dim);
+  border-radius:6px;font-size:10px;padding:0 6px;cursor:pointer;margin-left:6px}
+#aiTopCard .aistats button:hover{color:var(--txt);border-color:var(--accent)}
 #aiFab{position:fixed;right:14px;bottom:calc(16px + var(--safe-b));z-index:70;width:46px;height:46px;
   border-radius:50%;background:#16213a;border:1px solid var(--accent);color:#dbeafe;font-size:21px;
   display:none;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.5);cursor:pointer}
@@ -281,6 +285,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     <label class="ailbl"><input type="checkbox" id="aiAuto" checked>自动15分钟</label>
   </div>
   <div class="ainote" id="aiTopNote">未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。</div>
+  <div class="aistats" id="aiStats" style="display:none"></div>
 </div>
 <div id="aiFab" title="AI 分析（生成 / 配置）">🤖</div>
 <div id="aiFabMenu">
@@ -3358,7 +3363,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.68 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.69 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3709,6 +3714,44 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     try { var o = JSON.parse(t); if (o && typeof o === "object") return o; } catch (e) {}
     return null;
   }
+  function fmtNum(n) {
+    try { return Number(n || 0).toLocaleString("zh-CN"); } catch (e) { return String(n || 0); }
+  }
+  /** 每次真实调用成功后累计用量（按天重置；费用为估算，以控制台为准） */
+  function bumpAIStats(usage, model) {
+    var today = todayKey();
+    var s2 = st.aiStats;
+    if (!s2 || s2.date !== today) s2 = st.aiStats = { date: today, calls: 0, prompt: 0, completion: 0, total: 0, models: {} };
+    s2.calls = (s2.calls || 0) + 1;
+    if (usage) {
+      s2.prompt = (s2.prompt || 0) + (usage.prompt_tokens || 0);
+      s2.completion = (s2.completion || 0) + (usage.completion_tokens || 0);
+      var tot = usage.total_tokens != null ? usage.total_tokens : ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
+      s2.total = (s2.total || 0) + tot;
+    }
+    var m2 = model || "unknown";
+    s2.models = s2.models || {};
+    s2.models[m2] = (s2.models[m2] || 0) + 1;
+    try { save({ aiStats: s2 }); } catch (e) {}
+  }
+  function renderAIStats() {
+    var el = $("aiStats");
+    if (!el) return;
+    var s2 = st.aiStats;
+    if (!s2 || !s2.calls) { el.style.display = "none"; return; }
+    var cost = (s2.prompt || 0) / 1e6 * 1 + (s2.completion || 0) / 1e6 * 2;
+    el.style.display = "";
+    el.innerHTML = "今日 " + s2.calls + " 次 · 输入 " + fmtNum(s2.prompt) + " · 输出 " + fmtNum(s2.completion) +
+      " · 合计 " + fmtNum(s2.total) + " tokens · 估算 ¥" + cost.toFixed(3) +
+      "（按输入¥1/M、输出¥2/M，以控制台为准）" +
+      '<button id="aiStatsReset">重置</button>';
+    var b = el.querySelector ? el.querySelector("#aiStatsReset") : null;
+    if (b) b.addEventListener("click", function () {
+      if (!confirm("清空本机用量统计？（不影响 DeepSeek 后台账单）")) return;
+      st.aiStats = null; try { save({ aiStats: null }); } catch (e) {}
+      renderAIStats();
+    });
+  }
   function maskKey(k) {
     var v = String(k || "");
     if (!v) return "";
@@ -3801,6 +3844,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         " · tokens " + tok + " · 耗时 " + res.latencyMs + "ms · Key " + maskKey(key) +
         "。若后台仍无记录：请核对后台「API Key」筛选项是否就是这个 Key，或查看「全部 API Key」/账单页。";
       st.aiLastTest = { at: Date.now(), ok: true, model: res.apiModel, usage: res.usage, ms: res.latencyMs, httpStatus: res.httpStatus };
+      bumpAIStats(res.usage, res.apiModel);
+      try { renderAIStats(); } catch (e) {}
       try { save({ aiLastTest: st.aiLastTest }); } catch (e) {}
     }).catch(function (e) {
       aiTesting = false;
@@ -3911,6 +3956,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         st.aiAt = Date.now(); st.aiCode = st.code; st.aiCards = res.cards;
         st.aiText = res.cards.brief || res.raw || ""; st.aiModelUsed = res.model;
         st.aiUsage = res.usage || null; st.aiApiModel = res.apiModel || res.model;
+        bumpAIStats(res.usage, st.aiApiModel);
         st.aiHttpStatus = res.httpStatus || 200; st.aiLatencyMs = res.latencyMs || null;
         try { save({ aiAt: st.aiAt, aiCode: st.aiCode, aiCards: st.aiCards, aiText: st.aiText, aiModelUsed: st.aiModelUsed,
           aiUsage: st.aiUsage, aiApiModel: st.aiApiModel, aiHttpStatus: st.aiHttpStatus, aiLatencyMs: st.aiLatencyMs }); } catch (e) {}
@@ -3966,6 +4012,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           "；点「生成 AI 分析」或自动每 15 分钟。若后台无记录，请核对后台 API Key 是否与此 Key 一致。";
       } else note.textContent = "未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。";
     }
+    try { renderAIStats(); } catch (e) {}
   }
   function initAIFab() {
     var fab = $("aiFab"), menu = $("aiFabMenu");
@@ -4011,6 +4058,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var out = $("aiOut"), outHint = $("aiOutHint");
     if (out) out.style.display = "none";
     if (outHint) outHint.style.display = "none";
+    try { renderAIStats(); } catch (e) {}
     try { updateAITop(); } catch (e) {}
   }
   function initAISettings() {

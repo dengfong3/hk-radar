@@ -1653,5 +1653,13 @@ ok("记录 tokens 与真实模型", html.includes("aiUsage") && html.includes("a
 ok("测试结果含 HTTP/模型/tokens/耗时", html.includes("连接成功：HTTP") && html.includes("tokens") && html.includes("耗时"));
 ok("失败提示含状态与排查建议", html.includes("连接失败") && html.includes("账户是否欠费"));
 
+
+/* ---------- 66) AI 用量统计 ---------- */
+console.log("\n[AI 用量统计]");
+ok("用量统计行存在", html.includes('id="aiStats"'));
+ok("按天累计调用与 tokens", html.includes("bumpAIStats") && html.includes("aiStats") && html.includes("total_tokens"));
+ok("显示估算费用", html.includes("估算 ¥") && html.includes("以控制台为准"));
+ok("可本机重置统计", html.includes("aiStatsReset") && html.includes("清空本机用量统计"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
