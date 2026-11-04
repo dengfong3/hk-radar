@@ -214,16 +214,29 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
 
-#aiBanner{position:sticky;top:0;z-index:80;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
-  margin:0 0 9px;padding:7px 10px;border-radius:10px;font-size:11.5px;line-height:1.45;
-  background:#2a1f0a;border:1px solid #7c5a1a;color:#fcd34d;box-shadow:0 4px 14px rgba(0,0,0,.35)}
-#aiBanner.ok{background:#0e1f1a;border-color:#1f6f5a;color:#a7f3d0}
-#aiBanner.busy{background:#0f2740;border-color:#38bdf8;color:#bae6fd}
-#aiBanner b{font-weight:700}
-#aiBanner .bbtn{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
-#aiBanner button{border:1px solid currentColor;background:transparent;color:inherit;border-radius:7px;
-  font-size:10.5px;padding:2px 8px;cursor:pointer;font-weight:600}
-#aiBanner button:hover{background:rgba(255,255,255,.08)}
+#aiTopCard{position:sticky;top:0;z-index:85;margin:0 0 9px;padding:8px 10px;border-radius:10px;
+  background:rgba(17,26,43,.985);border:1px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.45)}
+#aiTopCard .aihead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+#aiTopCard .aihead b{font-size:12.5px}
+#aiTopCard #aiTopStatus{font-size:10px;margin-left:auto;color:var(--dim);border:1px solid var(--line);
+  border-radius:8px;padding:0 6px;white-space:nowrap}
+#aiTopCard.ok{border-color:#1f6f5a}
+#aiTopCard.busy{border-color:#38bdf8}
+#aiTopCard .airow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+#aiTopCard .airow input{flex:1 1 170px;min-width:0;min-height:34px;background:var(--card2);
+  border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:0 8px;font-size:13px}
+#aiTopCard .airow input.aimodel{flex:0 1 175px}
+#aiTopCard .airow button{min-height:32px;padding:0 9px;border:1px solid var(--line);border-radius:8px;
+  background:var(--card2);color:var(--txt);font-size:11.5px;cursor:pointer}
+#aiTopCard .airow button:hover{border-color:var(--accent)}
+#aiTopCard .ailbl{font-size:10.5px;color:var(--dim);white-space:nowrap}
+#aiTopCard .ainote{font-size:10.5px;line-height:1.45;margin-top:5px;color:#fcd34d}
+#aiTopCard.ok .ainote{color:#86efac}
+#aiTopCard.busy .ainote{color:#7dd3fc}
+@media(max-width:560px){
+  #aiTopCard .aimodel{flex:1 1 100%}
+  #aiTopCard .airow button{flex:1 1 auto}
+}
 .sinote{margin-top:6px;font-size:10.5px;line-height:1.55;color:#a7f3d0;background:#0e1f1a;
   border-left:2px solid #34d399;padding:4px 7px;border-radius:5px;white-space:pre-wrap}
 .disclaimer{font-size:10px;color:var(--dim2);line-height:1.7;margin-top:10px;padding:9px;
@@ -238,7 +251,18 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <button class="tb on" id="btnSound" title="声音与震动提醒">🔔</button>
   <button class="tb" id="btnEvent" title="重大利空开关：确认后所有价格规则让位，直接清仓">⚠</button>
 </div>
-<div id="aiBanner" style="display:none"></div>
+<div id="aiTopCard" class="card aipanel">
+  <div class="aihead"><b>AI 深度分析（DeepSeek）</b><span id="aiTopStatus">普通模式</span></div>
+  <div class="airow">
+    <input id="aiKey" type="password" placeholder="DeepSeek API Key（仅存本机，sk-...）" autocomplete="off">
+    <input id="aiModel" class="aimodel" placeholder="deepseek-v4.1-flash" autocomplete="off">
+    <button class="btn" id="aiGen">生成 AI 分析</button>
+    <button class="btn" id="aiClearKey">清除</button>
+    <label class="ailbl"><input type="checkbox" id="aiAuto" checked>自动15分钟</label>
+    <span id="aiStatus" style="font-size:10px;color:#8b9ab1"></span>
+  </div>
+  <div class="ainote" id="aiTopNote">未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。</div>
+</div>
 
 <div class="card codebar">
   <input id="codeInput" inputmode="text" autocomplete="off" autocapitalize="characters"
@@ -310,19 +334,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
 <div class="card">
   <div class="card-title"><b>实时分析简报</b><span class="sp"></span><span id="anaMeta" style="font-size:10px"></span></div>
-  <div class="hint" id="aiHint" style="display:none"></div>
-  <div id="aiSetup" style="display:none">
-    <div class="posgrid" style="grid-template-columns:1fr;gap:6px">
-      <div><label>DeepSeek API Key（仅存本机）</label><input id="aiKey" type="password" placeholder="sk-..."></div>
-      <div><label>模型</label><input id="aiModel" placeholder="deepseek-v4.1-flash"></div>
-    </div>
-    <div style="display:flex;gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap">
-      <button class="btn" id="aiGen">生成 AI 分析（全部卡片）</button>
-      <button class="btn" id="aiClearKey">清除 Key</button>
-      <label style="font-size:11px;color:#94a3b8"><input type="checkbox" id="aiAuto" checked> 每 15 分钟自动</label>
-      <span id="aiStatus" style="font-size:10px;color:#8b9ab1"></span>
-    </div>
-  </div>
   <div class="sigbox" id="anaBox"></div>
   <div class="hint" id="aiOutHint" style="display:none"></div>
   <div id="aiOut" style="white-space:pre-wrap;font-size:11px;line-height:1.5;color:#cbd5e1"></div>
@@ -3321,7 +3332,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.62 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.63 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3719,8 +3730,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (!metrics || metricsCode !== st.code) { if (status) status.textContent = "等待行情…"; return; }
     if (!lastRuleBrief) { try { renderAnalysisCard(true); } catch (e) {} }
     aiBusy = true;
-    try { renderAIBanner(); } catch (e) {}
-    if (hint) hint.style.display = "none";
+    try { updateAITop(); } catch (e) {}
+
     if (status) status.textContent = "拉取板块/大盘…";
     Promise.all([fetchSectorCtx(st.code), fetchMarketCtx()])
       .then(function (arr) {
@@ -3739,14 +3750,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         if (status) status.textContent = "AI 完成（全部卡片）" + hh + ":" + mm + " · " + res.model;
         if (hint) { hint.style.display = ""; hint.textContent = "AI 已把解读写入各卡片（绿色块）；仅作参考，不构成投资建议。"; }
         try { rerenderForAINotes(); } catch (e) {}
-        try { renderAIBanner(); } catch (e) {}
+        try { updateAITop(); } catch (e) {}
       })
       .catch(function (e) {
         if (status) status.textContent = "AI 失败";
         if (hint) { hint.style.display = ""; hint.textContent = "⚠ " + (e && e.message ? e.message : e) + "（检查 Key / 网络 / 模型名）"; }
-        try { renderAIBanner(); } catch (e2) {}
+        try { updateAITop(); } catch (e2) {}
       })
-      .then(function () { aiBusy = false; try { renderAIBanner(); } catch (e) {} });
+      .then(function () { aiBusy = false; try { updateAITop(); } catch (e) {} });
   }
   function maybeAIBrief() {
     if (st.aiAuto === false) return;
@@ -3755,55 +3766,36 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (st.aiCode !== st.code || !st.aiAt || Date.now() - st.aiAt >= 15 * 60 * 1000) generateAIBrief(false);
   }
   function openAIConfig() {
-    st.aiSetupOpen = true; save({ aiSetupOpen: true });
-    try { applyAIMode(); } catch (e) {}
-    var card = $("anaBox") ? $("anaBox").closest(".card") : null;
-    if (card) { try { card.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} }
-    setTimeout(function () { var k = $("aiKey"); if (k) try { k.focus(); } catch (e) {} }, 350);
+    var card = $("aiTopCard");
+    if (card) { try { card.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {} }
+    setTimeout(function () { var k = $("aiKey"); if (k) try { k.focus(); } catch (e) {} }, 300);
   }
-  function renderAIBanner() {
-    var el = $("aiBanner");
-    if (!el) return;
+  function updateAITop() {
+    var card = $("aiTopCard"), stt = $("aiTopStatus"), note = $("aiTopNote");
+    if (!card) return;
     var has = hasAIKey();
-    el.style.display = "";
-    if (aiBusy) {
-      el.className = "busy";
-      el.innerHTML = "🤖 <b>AI 正在分析全部卡片…</b><span class='bbtn'></span>";
-      return;
+    card.className = "card aipanel" + (aiBusy ? " busy" : has ? " ok" : "");
+    var last = "";
+    if (has && st.aiAt) {
+      var d = new Date(st.aiAt);
+      var hh = d.getHours() < 10 ? "0" + d.getHours() : d.getHours();
+      var mm = d.getMinutes() < 10 ? "0" + d.getMinutes() : d.getMinutes();
+      last = "上次 " + hh + ":" + mm + (st.aiModelUsed ? " · " + st.aiModelUsed : "");
     }
-    if (!has) {
-      el.className = "";
-      el.innerHTML = "⚠ <b>未配置 DeepSeek API Key</b>：当前只显示简版提示；配置后可生成全卡 AI 深度解读。" +
-        "<span class='bbtn'><button id='aiBannerCfg'>配置 AI</button><button id='aiBannerMachine'>看机器简报</button></span>";
-    } else {
-      el.className = "ok";
-      var last = "";
-      if (st.aiAt) {
-        var d = new Date(st.aiAt);
-        var hh = d.getHours() < 10 ? "0" + d.getHours() : d.getHours();
-        var mm = d.getMinutes() < 10 ? "0" + d.getMinutes() : d.getMinutes();
-        last = " · 上次 " + hh + ":" + mm + (st.aiModelUsed ? "（" + st.aiModelUsed + "）" : "");
-      }
-      el.innerHTML = "🤖 <b>AI 已配置</b>" + last + "<span class='bbtn'><button id='aiBannerGen'>生成 AI 分析</button><button id='aiBannerCfg'>配置</button></span>";
+    if (stt) stt.textContent = aiBusy ? "分析中…" : has ? (last || "已配置") : "普通模式";
+    if (note) {
+      if (aiBusy) note.textContent = "🤖 AI 正在分析全部卡片，请稍候…";
+      else if (has) note.textContent = "已配置大模型 Key：点「生成 AI 分析」或自动每 15 分钟，各卡片会追加 AI 深度解读。";
+      else note.textContent = "未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。";
     }
-    var c1 = el.querySelector("#aiBannerCfg"); if (c1) c1.addEventListener("click", openAIConfig);
-    var g1 = el.querySelector("#aiBannerGen"); if (g1) g1.addEventListener("click", function () { generateAIBrief(true); });
-    var m1 = el.querySelector("#aiBannerMachine"); if (m1) m1.addEventListener("click", function () {
-      st.showMachineBrief = true; save({ showMachineBrief: true });
-      try { renderAnalysisCard(true); } catch (e) {}
-      var card = $("anaBox") ? $("anaBox").closest(".card") : null;
-      if (card) { try { card.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} }
-    });
   }
   function hasAIKey() { return !!(st.aiKey && String(st.aiKey).trim()); }
   function applyAIMode() {
     var has = hasAIKey();
-    var setup = $("aiSetup"), hint = $("aiHint"), out = $("aiOut"), outHint = $("aiOutHint");
-    if (setup) setup.style.display = (has || st.aiSetupOpen) ? "" : "none";
+    var out = $("aiOut"), outHint = $("aiOutHint");
     if (out) out.style.display = has ? "" : "none";
     if (outHint) outHint.style.display = has ? "" : "none";
-    if (hint) hint.style.display = "none";   // 提示统一放在顶部置顶条，避免卡片内重复
-    try { renderAIBanner(); } catch (e) {}
+    try { updateAITop(); } catch (e) {}
   }
   function initAISettings() {
     var k = $("aiKey"), m = $("aiModel"), a = $("aiAuto");
@@ -3826,7 +3818,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       try { renderAnalysisCard(true); } catch (e) {}
     });
     applyAIMode();
-    try { renderAIBanner(); } catch (e) {}
+    try { updateAITop(); } catch (e) {}
     var out = $("aiOut");
     if (out && st.aiText && st.aiCode === st.code) out.textContent = st.aiText;
     var st2 = $("aiStatus");

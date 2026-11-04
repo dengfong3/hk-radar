@@ -1595,8 +1595,8 @@ ok("Key 只存本机", html.includes("st.aiKey") && html.includes("只保存在�
 
 /* ---------- 59) 无 Key 时回退到上一版机器简报 ---------- */
 console.log("\n[AI 回退模式]");
-ok("AI 设置区可折叠", html.includes('id="aiSetup"') && html.includes("applyAIMode"));
-ok("无 Key 提示与配置按钮", html.includes("未配置 DeepSeek API Key") && html.includes("aiBannerCfg"));
+ok("AI 设置区置顶（在顶部卡片）", html.includes('id="aiTopCard"') && html.includes("updateAITop"));
+ok("无 Key 提示与配置按钮", html.includes("未配置大模型 Key") && html.includes('id="aiKey"') && html.includes('id="aiGen"'));
 ok("无 Key 时用机器简报（上一版方式）", html.includes("机器简报（规则版") && html.includes("等同上一版方式"));
 ok("无 Key 时只有简版提示（可展开机器简报）", html.includes("anaConfig") && html.includes("anaShowMachine") && html.includes("anaCopy"));
 ok("有 Key 才显示 AI 输出", html.includes("hasAIKey") && html.includes("out.style.display = has ? \"\" : \"none\""));
@@ -1615,9 +1615,9 @@ ok("每日简报卡片已删除", !html.includes("<b>每日简报</b>"));
 
 /* ---------- 61) 置顶 AI 提示条 + 简版提示 ---------- */
 console.log("\n[置顶提示]");
-ok("顶部置顶提示条", html.includes('id="aiBanner"') && html.includes("position:sticky") && html.includes("renderAIBanner"));
+ok("顶部置顶 AI 输入卡", html.includes('id="aiTopCard"') && html.includes("position:sticky") && html.includes("updateAITop"));
 ok("未配置时只显示简版提示", html.includes("当前只显示<b>简版提示</b>") && html.includes("显示机器简报"));
-ok("置顶条有配置/生成按钮", html.includes("aiBannerCfg") && html.includes("aiBannerGen") && html.includes("aiBannerMachine"));
+ok("置顶卡有 Key/模型/生成/清除", html.includes('id="aiKey"') && html.includes('id="aiModel"') && html.includes('id="aiGen"') && html.includes('id="aiClearKey"'));
 ok("配置弹到简报卡", html.includes("openAIConfig") && html.includes("scrollIntoView"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
