@@ -3356,7 +3356,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.65 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.66 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3747,7 +3747,19 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   ];
   function applyRuleVisibility(box, tg, key) {
     var open = !!(st.aiRuleOpen && st.aiRuleOpen[key]);
-    if (box && box.classList) box.classList.toggle("airulehide", !open);
+    Array.prototype.slice.call(box.children).forEach(function (ch) {
+      if (!ch || ch.className === "sinote" || ch.className === "airuletoggle") return;
+      if (!open) {
+        if (ch.getAttribute("data-airule-disp") == null) {
+          ch.setAttribute("data-airule-disp", ch.getAttribute("style") || "");
+        }
+        ch.style.display = "none";
+      } else if (ch.getAttribute("data-airule-disp") != null) {
+        var saved = ch.getAttribute("data-airule-disp");
+        if (saved) ch.setAttribute("style", saved); else ch.removeAttribute("style");
+        ch.removeAttribute("data-airule-disp");
+      }
+    });
     if (tg) tg.textContent = open ? "▾ 收起规则明细" : "▸ 显示规则明细";
   }
   function paintAINotes() {
@@ -3760,7 +3772,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (!txt) {
         if (note && note.parentNode) note.parentNode.removeChild(note);
         if (tg && tg.parentNode) tg.parentNode.removeChild(tg);
-        if (box.classList) box.classList.remove("airulehide");
+        // 恢复被折叠的规则内容（用内联样式，不用持久 class，避免重渲染后被"永久隐藏"）
+        Array.prototype.slice.call(box.children).forEach(function (ch) {
+          if (ch && ch.getAttribute && ch.getAttribute("data-airule-disp") != null) {
+            var saved = ch.getAttribute("data-airule-disp");
+            if (saved) ch.setAttribute("style", saved); else ch.removeAttribute("style");
+            ch.removeAttribute("data-airule-disp");
+          }
+        });
         continue;
       }
       if (!note) {
@@ -3792,7 +3811,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     try { renderEntryTrackCard(); } catch (e) {}
     try { renderWashCard(); } catch (e) {}
     try { renderMacroCard(); } catch (e) {}
-    try { renderPoolCard(); } catch (e) {}
+    try { renderPoolCard(); try { paintAINotes(); } catch (e) {} } catch (e) {}
     try { renderPlanSummary(); } catch (e) {}
     try { renderAnalysisCard(); } catch (e) {}
     try { paintAINotes(); } catch (e) {}
@@ -4135,7 +4154,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (!confirm("清空全部观察池历史（含次日验证统计）？")) return;
       st.pools = [];
       save({ pools: st.pools });
-      renderPoolCard();
+      renderPoolCard(); try { paintAINotes(); } catch (e) {}
     });
     if (meta) meta.textContent = mine ? (poolLiveAt ? "实时 " + new Date(poolLiveAt).toTimeString().slice(0, 8) : "生成中…") : "未生成";
   }
@@ -5495,7 +5514,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         poolLive = C.parseBatchSnapshot(C.decodeText(buf, "gbk"));
         poolLiveAt = Date.now();
         poolLiveKey = codes;
-        renderPoolCard();
+        renderPoolCard(); try { paintAINotes(); } catch (e) {}
       })
       .catch(function () {});
   }
@@ -5605,7 +5624,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         save({ pools: st.pools });
         poolAutoDate = today;
         poolBuilding = false;
-        renderPoolCard();
+        renderPoolCard(); try { paintAINotes(); } catch (e) {}
         return;
       }
       var def = defs[i++];
@@ -5660,7 +5679,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (!stats.n) return;
       pool.verify = { at: Date.now(), basis: "next-open", stats: stats, nextDate: stats.nextDate };
       save({ pools: st.pools });
-      try { renderPoolCard(); } catch (e) {}
+      try { renderPoolCard(); try { paintAINotes(); } catch (e) {} } catch (e) {}
     }
     function next() {
       if (idx >= picks.length) { done(); return; }
@@ -6072,7 +6091,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   $("footVer").textContent = "版本 " + APP_VERSION;
   st.srcStats = st.srcStats || { since: C.todayStr(), tencent: 0, eastmoney: 0, snapshot: 0, fail: 0, downMs: 0 };
   $("footHealth").textContent = C.srcHealthText(st.srcStats);
-  try { verifyPools(); renderPoolCard(); } catch (e) {}
+  try { verifyPools(); renderPoolCard(); try { paintAINotes(); } catch (e) {} } catch (e) {}
   // 清理旧格式简报键（只有日期没有代码），并按当前股票渲染
   (function () {
     st.briefs = st.briefs || {};
