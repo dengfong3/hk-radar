@@ -296,8 +296,20 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 </div>
 
 <div class="card">
-  <div class="card-title"><b>15 分钟分析简报</b><span class="sp"></span><span id="anaMeta" style="font-size:10px"></span></div>
+  <div class="card-title"><b>实时分析简报</b><span class="sp"></span><span id="anaMeta" style="font-size:10px"></span></div>
+  <div class="hint" id="aiHint" style="display:none"></div>
+  <div class="posgrid" style="grid-template-columns:1fr;gap:6px">
+    <div><label>DeepSeek API Key（仅存本机）</label><input id="aiKey" type="password" placeholder="sk-..."></div>
+    <div><label>模型</label><input id="aiModel" placeholder="deepseek-v4.1-flash"></div>
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap">
+    <button class="btn" id="aiGen">生成 AI 简报</button>
+    <label style="font-size:11px;color:#94a3b8"><input type="checkbox" id="aiAuto" checked> 每 15 分钟自动</label>
+    <span id="aiStatus" style="font-size:10px;color:#8b9ab1"></span>
+  </div>
   <div class="sigbox" id="anaBox"></div>
+  <div class="hint" id="aiOutHint" style="display:none"></div>
+  <div id="aiOut" style="white-space:pre-wrap;font-size:11px;line-height:1.5;color:#cbd5e1"></div>
 </div>
 
 <div class="card">
@@ -2274,7 +2286,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     }
 
     /**
-     * 15 分钟分析简报（纯规则生成，不调用任何 AI）：
+     * 实时分析简报（纯规则生成，不调用任何 AI）：
      * 输入 quote/metrics/多周期/日线/盘口/洗盘/评分/交易计划/持仓，输出结构化文本。
      */
     function buildAnalysisReport(inp) {
@@ -3296,7 +3308,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.58 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.59 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3388,7 +3400,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   }
 
 
-  /* ---------- 15 分钟分析简报（规则化文本，可自动刷新） ---------- */
+  /* ---------- 实时分析简报（规则化文本，可自动刷新） ---------- */
   function escHtml(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -3414,6 +3426,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     try { wash = C.washoutDetect(metrics, points, mpData, ctx3Data, st.code, {}); } catch (e) { wash = null; }
     var ea = null;
     try { ea = C.entryAdvice(metrics, points, mpData, ctx3Data, refs, setup, dailyData, orderData, pos, st.code, { capital: curCapital() }); } catch (e) { ea = null; }
+    lastRuleCtx = { setup: setup, plan: plan, wash: wash, ea: ea, refs: refs, pos: pos };
     var text = C.buildAnalysisReport({
       code: st.code, name: (parsed.quote && parsed.quote.name) || "", m: metrics, mp: mpData, ctx3: ctx3Data,
       daily: dailyData, order: orderData, wash: wash, setup: setup, plan: plan, refs: refs, pos: pos, ea: ea,
@@ -3423,20 +3436,236 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var ts = new Date();
     var hh = ts.getHours() < 10 ? "0" + ts.getHours() : ts.getHours();
     var mm = ts.getMinutes() < 10 ? "0" + ts.getMinutes() : ts.getMinutes();
-    if (meta) meta.textContent = "生成于 " + hh + ":" + mm + (force ? "（手动）" : "（自动，每 15 分钟）");
-    box.innerHTML = '<div style="display:flex;gap:6px;margin-bottom:4px">' +
-      '<button class="btn" id="anaNow">立即生成</button><button class="btn" id="anaCopy">复制全文</button></div>' +
+    if (meta) meta.textContent = "机器摘要 " + hh + ":" + mm + (force ? "（手动）" : "（自动）");
+    lastRuleBrief = text;
+    box.innerHTML = '<div class="hint">机器摘要（规则引擎，随行情刷新；AI 深度版见下方）</div>' +
       '<pre style="white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit">' + escHtml(text) + "</pre>";
-    var bn = box.querySelector("#anaNow");
-    if (bn) bn.addEventListener("click", function () { renderAnalysisCard(true); });
-    var bc = box.querySelector("#anaCopy");
-    if (bc) bc.addEventListener("click", function () {
-      try {
-        navigator.clipboard.writeText(text);
-        bc.textContent = "已复制";
-        setTimeout(function () { bc.textContent = "复制全文"; }, 1200);
-      } catch (e) { /* 忽略 */ }
+  }
+
+  /* ---------- AI 深度简报（DeepSeek，结合个股/板块/大盘） ---------- */
+  var lastRuleBrief = "";
+  var lastRuleCtx = null;
+  var aiBusy = false;
+  var sectorCache = { code: "", at: 0, data: null };
+  function emSecid(code) {
+    var c = String(code || "");
+    if (/^hk\d+/.test(c)) return "116." + c.slice(2);
+    if (/^sh\d+/.test(c)) return "1." + c.slice(2);
+    if (/^sz\d+/.test(c)) return "0." + c.slice(2);
+    if (/^bj\d+/.test(c)) return "0." + c.slice(2);
+    return "";
+  }
+  function fetchJsonTimeout(url, ms) {
+    return new Promise(function (resolve, reject) {
+      var ctl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+      var t = setTimeout(function () { try { if (ctl) ctl.abort(); } catch (e) {} reject(new Error("请求超时")); }, ms || 8000);
+      fetch(url, { cache: "no-store", signal: ctl ? ctl.signal : undefined })
+        .then(function (r) { clearTimeout(t); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(resolve).catch(function (e) { clearTimeout(t); reject(e); });
     });
+  }
+  function fetchSectorCtx(code) {
+    if (sectorCache.code === code && Date.now() - sectorCache.at < 5 * 60 * 1000) return Promise.resolve(sectorCache.data);
+    var out = { industry: "", concepts: [], board: null, leaders: [], note: "" };
+    var secid = emSecid(code);
+    if (!secid) return Promise.resolve(out);
+    var hosts = ["push2.eastmoney.com", "push2delay.eastmoney.com", "82.push2.eastmoney.com"];
+    function tryHost(i) {
+      if (i >= hosts.length) return Promise.resolve(out);
+      return fetchJsonTimeout("https://" + hosts[i] + "/api/qt/stock/get?secid=" + secid + "&fields=f57,f58,f127,f129", 7000)
+        .then(function (j) {
+          var d = (j && j.data) || {};
+          out.industry = d.f127 || "";
+          out.concepts = String(d.f129 || "").split(",").filter(Boolean).slice(0, 8);
+          if (!out.industry) return out;
+          return fetchJsonTimeout("https://" + hosts[i] + "/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f62&fs=m:90+t:2&fields=f3,f12,f14,f62", 8000)
+            .then(function (b) {
+              var rows = (b && b.data && b.data.diff) || [];
+              var hit = null;
+              for (var k = 0; k < rows.length; k++) {
+                var nm = String(rows[k].f14 || "");
+                if (nm && (nm === out.industry || out.industry.indexOf(nm) >= 0 || nm.indexOf(out.industry) >= 0)) { hit = rows[k]; break; }
+              }
+              if (!hit) { out.note = "板块行情未匹配到（可能接口限流或港股无对应行业板块）"; return out; }
+              out.board = { name: hit.f14, chgPct: hit.f3, mainFlowYi: hit.f62 == null ? null : hit.f62 / 1e8, code: hit.f12 };
+              return fetchJsonTimeout("https://" + hosts[i] + "/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invt=2&fid=f3&fs=b:" + hit.f12 + "&fields=f3,f12,f13,f14", 8000)
+                .then(function (c) {
+                  var rs = (c && c.data && c.data.diff) || [];
+                  out.leaders = rs.slice(0, 6).map(function (x) { return { name: x.f14, chgPct: x.f3 }; });
+                  return out;
+                })
+                .catch(function () { return out; });
+            })
+            .catch(function () { return out; });
+        })
+        .catch(function () { return tryHost(i + 1); });
+    }
+    return tryHost(0).then(function (d) { sectorCache = { code: code, at: Date.now(), data: d }; return d; });
+  }
+  function fetchMarketCtx() {
+    return fetch("https://qt.gtimg.cn/q=sh000001,sz399001,sz399006,sh000300,sh000688", { cache: "no-store" })
+      .then(function (r) { return r.arrayBuffer(); })
+      .then(function (buf) {
+        var q = C.parseBatchSnapshot(C.decodeText(buf, "gbk"));
+        var nm = { sh000001: "上证", sz399001: "深成指", sz399006: "创业板", sh000300: "沪深300", sh000688: "科创50" };
+        var arr = [];
+        for (var k in nm) if (q[k]) arr.push({ name: nm[k], chgPct: q[k].chgPct });
+        return arr;
+      })
+      .catch(function () { return []; });
+  }
+  function buildAIContext(sector, market) {
+    var points = allPointsNow();
+    var tail = points.slice(-12).map(function (p) { return p.hhmm + " " + p.price; });
+    var buckets = [];
+    for (var i = Math.max(0, points.length - 8 * 15); i < points.length; i += 15) {
+      var ch = points.slice(i, i + 15);
+      if (ch.length) buckets.push(ch[0].hhmm + "–" + ch[ch.length - 1].hhmm + " 收 " + ch[ch.length - 1].price);
+    }
+    var pos = curPos();
+    var rc = lastRuleCtx || {};
+    var mp = mpData || {};
+    var pnl = (pos.shares > 0 && pos.cost > 0) ? (metrics.price - pos.cost) * pos.shares : null;
+    return {
+      asOf: new Date().toISOString(),
+      stock: {
+        code: C.displayCode(st.code), name: (parsed.quote && parsed.quote.name) || "",
+        market: C.marketOf(st.code) === "cn" ? "A股" : "港股",
+        price: metrics.price, chgPct: metrics.changePct, open: parsed.quote.open, high: parsed.quote.high,
+        low: parsed.quote.low, prevClose: parsed.quote.prevClose, vwap: metrics.vwap, vwapDevPct: metrics.vwapDevPct,
+        dayPosPct: parsed.quote.high > parsed.quote.low ? (metrics.price - parsed.quote.low) / (parsed.quote.high - parsed.quote.low) * 100 : null,
+        turnoverYi: parsed.quote.turnover ? parsed.quote.turnover / 1e8 : null
+      },
+      intraday: { tailMinute: tail, buckets15: buckets },
+      daily: dailyData ? {
+        trend: dailyData.trend, ma20: dailyData.ma20, ma60: dailyData.ma60,
+        distMa20Pct: dailyData.ma20 ? (metrics.price / dailyData.ma20 - 1) * 100 : null,
+        distMa60Pct: dailyData.ma60 ? (metrics.price / dailyData.ma60 - 1) * 100 : null,
+        macd: dailyData.macd, kdj: dailyData.kdj, low20: dailyData.low20, high20: dailyData.high20,
+        low60: dailyData.low60, high60: dailyData.high60,
+        lastBars: (dailyData.lastBars || []).slice(-6)
+      } : null,
+      multiPeriod: { bias: mp.bias, score: mp.score, valid: mp.valid },
+      order: orderData || null,
+      wash: rc.wash || null,
+      setup: rc.setup || null,
+      plan: rc.plan || null,
+      entryAdvice: rc.ea || null,
+      refs: rc.refs || null,
+      position: (pos.shares > 0 && pos.cost > 0) ? { shares: pos.shares, cost: pos.cost, pnl: Math.round(pnl), pnlPct: (metrics.price / pos.cost - 1) * 100 } : null,
+      sector: sector || null,
+      market: market || [],
+      marketVsStock: (indexData && indexData.pct != null && metrics.changePct != null)
+        ? { benchmark: indexData.code, benchmarkChgPct: indexData.pct, relativePct: metrics.changePct - indexData.pct } : null,
+      ruleSummary: lastRuleBrief
+    };
+  }
+  function aiSystemPrompt() {
+    return "你是A股/港股实时盘面分析助手，只依据用户提供的实时数据做判断，禁止编造数据；数据缺失就明确说明。\n" +
+      "要求：\n" +
+      "1) 先给明确结论：当前更适合「持股 / 减仓 / 清仓 / 观望 / 建仓」中的哪一种，一句话说清核心理由；若用户有持仓（position），给出具体动作与股数建议。\n" +
+      "2) 分三层分析，必须引用具体数字与价位：①个股结构与量价（趋势、均线、VWAP、日内位置、量能、洗盘/出货证据、评分与否决项）②所属板块（板块涨跌、主力资金、领涨个股、个股相对板块强弱）③大盘环境（各指数涨跌、市场风格、对个股的助力或拖累）。要指出矛盾点，例如个股强于板块但大盘弱、板块强但个股不涨。\n" +
+      "3) 给出关键位：压力、支撑、止损/失效条件；并给出明日三种情景（高开/平开/低开）分别怎么做。\n" +
+      "4) 末尾必须写风险提示，声明不构成投资建议、不承诺收益。\n" +
+      "输出 600-900 字，分节：一、结论与动作 二、个股结构 三、板块与大盘 四、关键位与情景 五、风险提示。";
+  }
+  function callDeepSeek(ctx) {
+    var key = String(st.aiKey || "").trim();
+    if (!key) return Promise.reject(new Error("请先在「实时分析简报」卡里填 DeepSeek API Key"));
+    var model = String(st.aiModel || "deepseek-v4.1-flash").trim();
+    var user = "请基于以下实时数据分析（json）：\n" + JSON.stringify(ctx);
+    function once(mdl) {
+      return fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+        body: JSON.stringify({
+          model: mdl, temperature: 0.35, max_tokens: 1400,
+          messages: [{ role: "system", content: aiSystemPrompt() }, { role: "user", content: user }]
+        })
+      }).then(function (r) {
+        return r.text().then(function (t) {
+          var j = null;
+          try { j = JSON.parse(t); } catch (e) {}
+          if (!r.ok) {
+            var msg = (j && j.error && j.error.message) || t.slice(0, 200) || ("HTTP " + r.status);
+            var err = new Error(msg); err.status = r.status; throw err;
+          }
+          var c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+          if (!c) throw new Error("AI 返回为空");
+          return { text: String(c).trim(), model: mdl };
+        });
+      });
+    }
+    return once(model).catch(function (e) {
+      if (e && (e.status === 400 || e.status === 404) && /model/i.test(String(e.message))) return once("deepseek-chat");
+      throw e;
+    });
+  }
+  function generateAIBrief(manual) {
+    if (aiBusy) return;
+    var key = String(st.aiKey || "").trim();
+    var status = $("aiStatus"), out = $("aiOut"), hint = $("aiOutHint");
+    if (!key) {
+      if (hint) { hint.style.display = ""; hint.textContent = "⚠ 未配置 DeepSeek API Key：请在下方输入（只保存在本机浏览器；建议使用限额 Key）。"; }
+      if (status) status.textContent = "未配置 Key";
+      return;
+    }
+    if (!metrics || metricsCode !== st.code) { if (status) status.textContent = "等待行情…"; return; }
+    if (!lastRuleBrief) { try { renderAnalysisCard(true); } catch (e) {} }
+    aiBusy = true;
+    if (hint) hint.style.display = "none";
+    if (status) status.textContent = "拉取板块/大盘…";
+    Promise.all([fetchSectorCtx(st.code), fetchMarketCtx()])
+      .then(function (arr) {
+        if (status) status.textContent = "AI 分析中…";
+        return callDeepSeek(buildAIContext(arr[0], arr[1]));
+      })
+      .then(function (res) {
+        st.aiAt = Date.now(); st.aiCode = st.code; st.aiText = res.text; st.aiModelUsed = res.model;
+        save({ aiAt: st.aiAt, aiCode: st.aiCode, aiText: st.aiText, aiModelUsed: st.aiModelUsed });
+        if (out) out.textContent = res.text;
+        var ts = new Date();
+        var hh = ts.getHours() < 10 ? "0" + ts.getHours() : ts.getHours();
+        var mm = ts.getMinutes() < 10 ? "0" + ts.getMinutes() : ts.getMinutes();
+        if (status) status.textContent = "AI 完成 " + hh + ":" + mm + " · " + res.model;
+        if (hint) { hint.style.display = ""; hint.textContent = "AI 分析基于实时数据生成，仅作参考，不构成投资建议。"; }
+      })
+      .catch(function (e) {
+        if (status) status.textContent = "AI 失败";
+        if (hint) { hint.style.display = ""; hint.textContent = "⚠ " + (e && e.message ? e.message : e) + "（检查 Key / 网络 / 模型名）"; }
+      })
+      .then(function () { aiBusy = false; });
+  }
+  function maybeAIBrief() {
+    if (st.aiAuto === false) return;
+    if (!st.aiKey) return;
+    if (!metrics || metricsCode !== st.code) return;
+    if (st.aiCode !== st.code || !st.aiAt || Date.now() - st.aiAt >= 15 * 60 * 1000) generateAIBrief(false);
+  }
+  function initAISettings() {
+    var k = $("aiKey"), m = $("aiModel"), a = $("aiAuto");
+    if (k) k.value = st.aiKey || "";
+    if (m) m.value = st.aiModel || "deepseek-v4.1-flash";
+    if (a) a.checked = st.aiAuto !== false;
+    if (k) k.addEventListener("change", function () { st.aiKey = k.value.trim(); save({ aiKey: st.aiKey }); });
+    if (m) m.addEventListener("change", function () { st.aiModel = m.value.trim(); save({ aiModel: st.aiModel }); });
+    if (a) a.addEventListener("change", function () { st.aiAuto = !!a.checked; save({ aiAuto: st.aiAuto }); });
+    var g = $("aiGen");
+    if (g) g.addEventListener("click", function () { generateAIBrief(true); });
+    var out = $("aiOut");
+    if (out && st.aiText && st.aiCode === st.code) out.textContent = st.aiText;
+    var hint = $("aiHint");
+    if (hint && !st.aiKey) {
+      hint.style.display = "";
+      hint.textContent = "⚠ 未配置 DeepSeek API Key：填入下方（只保存在本机浏览器）后点「生成 AI 简报」；建议使用限额 Key。";
+    }
+    var st2 = $("aiStatus");
+    if (st2 && st.aiAt) {
+      var d = new Date(st.aiAt);
+      var hh = d.getHours() < 10 ? "0" + d.getHours() : d.getHours();
+      var mm = d.getMinutes() < 10 ? "0" + d.getMinutes() : d.getMinutes();
+      st2.textContent = "上次 AI " + hh + ":" + mm + (st.aiModelUsed ? " · " + st.aiModelUsed : "");
+    }
   }
 
   /* ---------- 智能信号（共识评分）与信号台账 ---------- */
@@ -5255,6 +5484,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
         try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
         try { if (st.anaCode !== st.code || !st.anaAt || Date.now() - st.anaAt >= 15 * 60 * 1000) renderAnalysisCard(); } catch (e) { /* 简报失败不阻塞 */ }
+        try { maybeAIBrief(); } catch (e) { /* AI 简报失败不阻塞 */ }
         try {
           if (st.watch.length > 1 && Date.now() - multiLiveAt > 15000) fetchMultiLive();
         } catch (e) {}
@@ -5383,6 +5613,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     save({ code: st.code, watch: st.watch });
     parsed = null; metrics = null; metricsCode = ""; lastActive = {}; alertQueue = []; renderAlert();
     try { paintCardPrices(); } catch (e) {}
+    try { st.aiCode = ""; var _ao = $("aiOut"); if (_ao) _ao.textContent = ""; if ($("aiStatus")) $("aiStatus").textContent = ""; } catch (e) {}
     try { renderBurstCard(); } catch (e) {}
     $("codeInput").value = C.displayCode(code);
     renderChips(); renderPlanSummary(); bindPosInputs();
@@ -5599,6 +5830,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   try { renderBurstCard(); } catch (e) {}
   try { renderEntryCard(); } catch (e) {}
   try { renderEntryTrackCard(); } catch (e) {}
+  try { initAISettings(); } catch (e) {}
   tick(false);
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(function () { /* 线上需要 https 才注册 */ });

@@ -1540,9 +1540,9 @@ ok("建仓建议不支持 → 不弹窗", C.burstAlertGate(gBuy, gMp, gM, { mark
 ok("页面含分级文案", html.includes("强买点") && html.includes("普通试探买点只在卡片显示"));
 
 
-/* ---------- 55) 15 分钟分析简报 ---------- */
-console.log("\n[15 分钟分析简报]");
-ok("页面含简报卡片", html.includes('id="anaBox"') && html.includes("15 分钟分析简报"));
+/* ---------- 55) 实时分析简报（机器摘要） ---------- */
+console.log("\n[实时分析简报]");
+ok("页面含简报卡片", html.includes('id="anaBox"') && html.includes("实时分析简报"));
 const repIn = {
   code: "sz300750", name: "宁德时代", at: new Date(2026, 10, 4, 14, 7, 3),
   quote: { prevClose: 249.32, open: 249.32, high: 255, low: 245.5, turnover: 1.2e10 },
@@ -1582,6 +1582,18 @@ ok("页面含每卡实时价逻辑", html.includes("paintCardPrices") && html.in
 ok("每卡实时价样式", html.includes(".cardpx") && html.includes(".cardpx.up") && html.includes(".cardpx.down"));
 ok("保持 v0.54 单列（无网格重排）", !html.includes("buildCardGrid") && !html.includes("grid-template-columns:1fr 1fr"));
 ok("徽标跟随切换重置", (html.match(/paintCardPrices\(\); \} catch/g) || []).length >= 2);
+
+
+/* ---------- 58) AI 深度简报（DeepSeek） ---------- */
+console.log("\n[AI 深度简报]");
+ok("简报已更名为「实时分析简报」", html.includes("<b>实时分析简报</b>"));
+ok("AI 设置 UI 存在", html.includes('id="aiKey"') && html.includes('id="aiModel"') && html.includes('id="aiGen"') && html.includes('id="aiAuto"') && html.includes('id="aiOut"'));
+ok("调用 DeepSeek 接口", html.includes("api.deepseek.com/chat/completions"));
+ok("默认模型 deepseek-v4.1-flash", html.includes("deepseek-v4.1-flash"));
+ok("提示词要求板块/大盘/风险", html.includes("aiSystemPrompt") && html.includes("所属板块") && html.includes("大盘环境") && html.includes("风险提示"));
+ok("AI 简报自动触发", html.includes("maybeAIBrief") && html.includes("generateAIBrief"));
+ok("上下文含个股/板块/大盘", html.includes("buildAIContext") && html.includes("fetchSectorCtx") && html.includes("fetchMarketCtx"));
+ok("Key 只存本机", html.includes("st.aiKey") && html.includes("只保存在本机浏览器"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
