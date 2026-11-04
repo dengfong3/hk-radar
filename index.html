@@ -223,13 +223,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 #aiTopCard.ok{border-color:#1f6f5a}
 #aiTopCard.busy{border-color:#38bdf8}
 #aiTopCard .airow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-#aiTopCard .airow input{flex:1 1 170px;min-width:0;min-height:34px;background:var(--card2);
+#aiTopCard .airow input:not([type="checkbox"]){flex:1 1 170px;min-width:0;min-height:34px;background:var(--card2);
   border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:0 8px;font-size:13px}
 #aiTopCard .airow input.aimodel{flex:0 1 175px}
 #aiTopCard .airow button{min-height:32px;padding:0 9px;border:1px solid var(--line);border-radius:8px;
   background:var(--card2);color:var(--txt);font-size:11.5px;cursor:pointer}
 #aiTopCard .airow button:hover{border-color:var(--accent)}
-#aiTopCard .ailbl{font-size:10.5px;color:var(--dim);white-space:nowrap}
+#aiTopCard .ailbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap}
+#aiTopCard .ailbl input[type="checkbox"]{width:14px;height:14px;flex:0 0 auto;margin:0;padding:0;accent-color:var(--accent)}
 #aiTopCard .ainote{font-size:10.5px;line-height:1.45;margin-top:5px;color:#fcd34d}
 #aiFab{position:fixed;right:14px;bottom:calc(16px + var(--safe-b));z-index:70;width:46px;height:46px;
   border-radius:50%;background:#16213a;border:1px solid var(--accent);color:#dbeafe;font-size:21px;
@@ -1846,7 +1847,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         return o.state;
       } catch (e) { return null; }
     }
-    /** 观察池历史（按日期倒序），返回可直接渲染的行 */
+    /** 观察池历史（近 3 天）（按日期倒序），返回可直接渲染的行 */
     /**
      * 观察池次日验证（用日线 K 线，支持补验历史遗漏的日期）：
      * 以池子当天收盘价为基准，取「池子日期之后的第一根日线」= 次一交易日；
@@ -3356,7 +3357,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.66 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.67 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4041,9 +4042,21 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (meta) meta.textContent = "大周期与强度";
   }
 
+  /** 观察池历史（近 3 天）只保留最近 N 天（含今天），按日期去重 */
+  function prunePools(keepDays) {
+    var keep = keepDays || 3;
+    var byDate = {};
+    (st.pools || []).forEach(function (p) { if (p && p.date) byDate[p.date] = p; });
+    var dates = Object.keys(byDate).sort();
+    var kept = dates.slice(-keep);
+    var changed = kept.length !== (st.pools || []).length || dates.length !== (st.pools || []).length;
+    st.pools = kept.map(function (d) { return byDate[d]; });
+    if (changed) save({ pools: st.pools });
+  }
   function renderPoolCard() {
     var box = $("poolBox"), meta = $("poolMeta");
     if (!box) return;
+    try { prunePools(3); } catch (e) {}
     var today = todayKey();
     var pools = st.pools || [];
     var mine = null;
@@ -4131,11 +4144,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     } else {
       html += '<div class="sigwhy">次日验证：次日打开时会自动用开盘价回填昨日名单涨跌，累计几天后看命中率。</div>';
     }
-    // 观察池历史列表（最近 10 天，含次日结果）
+    // 观察池历史（近 3 天）列表（最近 10 天，含次日结果）
     try {
       var hist = C.poolHistoryLines(st.pools || [], 10);
       if (hist.length) {
-        html += '<div class="sigwhy" style="margin-top:6px"><b>观察池历史</b>（最近 ' + hist.length + ' 天）</div>';
+        html += '<div class="sigwhy" style="margin-top:6px"><b>观察池历史（近 3 天）</b>（最近 ' + hist.length + ' 天）</div>';
         for (var hi = 0; hi < hist.length; hi++) {
           var it = hist[hi];
           var body = it.text.replace(/^\S+ · /, "");
@@ -4151,7 +4164,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (b1) b1.addEventListener("click", function () { buildPool(); });
     if (b2) b2.addEventListener("click", function () { buildPool(); });
     if (b3) b3.addEventListener("click", function () {
-      if (!confirm("清空全部观察池历史（含次日验证统计）？")) return;
+      if (!confirm("清空全部观察池历史（近 3 天）（含次日验证统计）？")) return;
       st.pools = [];
       save({ pools: st.pools });
       renderPoolCard(); try { paintAINotes(); } catch (e) {}
@@ -5620,7 +5633,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         st.pools = st.pools.filter(function (p) { return p.date !== today; });
         st.pools.push({ date: today, genAt: Date.now(), picks: ranked.picks, listsOk: okCount,
           listsTotal: defs.length, source: sinaUsed ? "sina" : "em" });
-        if (st.pools.length > 10) st.pools = st.pools.slice(-10);
+        prunePools(3);   // 观察池历史（近 3 天）只保留近 3 天
         save({ pools: st.pools });
         poolAutoDate = today;
         poolBuilding = false;

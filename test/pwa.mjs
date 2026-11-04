@@ -1637,5 +1637,12 @@ ok("提供悬浮 AI 入口", html.includes('id="aiFab"') && html.includes("initA
 ok("悬浮菜单含生成/配置/回到AI卡", html.includes('id="fabGen"') && html.includes('id="fabCfg"') && html.includes('id="fabTop"'));
 ok("滚过 AI 卡才显示悬浮按钮", html.includes("getBoundingClientRect") && html.includes("aiFab"));
 
+
+/* ---------- 64) 复选框对齐 + 观察池只留近 3 天 ---------- */
+console.log("\n[排版与观察池保留]");
+ok("自动15分钟复选框不再套用输入框样式", html.includes('input:not([type="checkbox"])') && html.includes("accent-color"));
+ok("标签行内对齐", html.includes("display:inline-flex;align-items:center;gap:4px"));
+ok("观察池只保留近 3 天", html.includes("prunePools(3)") && html.includes("slice(-keep)") && html.includes("近 3 天"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
