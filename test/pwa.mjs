@@ -1698,5 +1698,12 @@ ok("标题不再带长括号", !html.includes("定时深度简报（盘前 / 午
 ok("自动窗口移到正文提示", html.includes('id="schedHint"') && html.includes("自动窗口（工作日）"));
 ok("meta 只显示进度", html.includes('id="schedMeta"') && html.includes('"未生成"'));
 
+
+/* ---------- 71) 缺失数据不进正文 ---------- */
+console.log("\n[缺失数据处理]");
+ok("缺失数据不传给模型", html.includes("delete ctx.announcements") && html.includes("delete ctx.sector") && html.includes("delete ctx.overnight"));
+ok("提示词禁止缺失小节与字段名", html.includes("正文禁止出现技术字段名") && html.includes("最多在最后加一行：数据缺口"));
+ok("数据缺口只在摘要行小字展示", html.includes("rec.gaps") && html.includes("数据缺口：") && html.includes('class="scheddata"'));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

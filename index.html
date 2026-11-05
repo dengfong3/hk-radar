@@ -3384,7 +3384,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.74 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.75 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4199,6 +4199,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       sector: extras.sector, market: extras.market, overnight: extras.overnight, announcements: extras.announcements,
       dataLine: schedDataLine(phase, extras)
     };
+    var gaps = [];
+    if (!extras.announcements) { gaps.push("公告"); delete ctx.announcements; }
+    if (!extras.sector || (!extras.sector.board && !extras.sector.industry && !(extras.sector.concepts && extras.sector.concepts.length))) { gaps.push("板块"); delete ctx.sector; }
+    if (phase === "preopen" && (!extras.overnight || !extras.overnight.length)) { gaps.push("隔夜外盘"); delete ctx.overnight; }
+    if (!extras.market || !extras.market.length) { gaps.push("大盘"); delete ctx.market; }
+    ctx.dataGaps = gaps;
     if (points && points.length) {
       ctx.session = { high: q.high, low: q.low, vwap: metrics.vwap, chgPct: metrics.changePct, points: points.slice(-60).map(function (x) { return x.hhmm + " " + x.price; }) };
     }
@@ -4212,14 +4218,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     return ctx;
   }
   function schedSystemPrompt(phase) {
-    var common = "你是A股/港股交易策略助手，只依据用户提供的实时数据与公告/外盘数据分析，禁止编造新闻、公告或数据；数据缺失要明确说明。必须给出可执行的价格位与情景应对，不承诺收益，不构成投资建议。\n";
+    var common = "你是A股/港股交易策略助手，只依据用户提供的实时数据与公告/外盘数据分析，禁止编造新闻、公告或数据。必须给出可执行的价格位与情景应对，不承诺收益，不构成投资建议。\n" +
+      "重要：正文禁止出现技术字段名（如 announcements、sector、null、dataGaps）；不要用单独一节或一段描述“某数据缺失/无法获取”；若输入 dataGaps 非空，直接从正文省略对应内容，最多在最后加一行：数据缺口：xxx。\n";
     if (phase === "preopen") {
-      return common + "现在做「盘前简报」：①隔夜外盘（美股/A50 等，若提供）对A股/港股情绪的影响 ②昨日收盘结构（趋势/均线/MACD/KDJ/20日区间/量价）③盘前公告（若提供）对个股的影响 ④所属板块与概念 ⑤今日开盘三情景（高开/平开/低开）分别怎么操作（关键位、减仓/加仓/止损、仓位建议）。输出 350-550 字，分节：一、隔夜与外盘 二、昨日结构 三、公告与板块 四、今日开盘策略（三情景）五、一句话。";
+      return common + "现在做「盘前简报」：①隔夜外盘（若提供）对A股/港股情绪的影响 ②昨日收盘结构（趋势/均线/MACD/KDJ/20日区间/量价）③盘前公告（仅在有数据时写）④所属板块与概念（仅在有数据时写）⑤今日开盘三情景（高开/平开/低开）分别怎么操作（关键位、减仓/加仓/止损、仓位建议）。输出 350-550 字，分节：一、隔夜与外盘（无数据则省略） 二、昨日结构 三、公告与板块（仅在有数据时写） 四、今日开盘策略（三情景） 五、一句话（含数据缺口一行，若有）。";
     }
     if (phase === "midday") {
-      return common + "现在做「午间简报」：①上午走势结构（高低/均价/量能/分时节奏）②午间公告（若提供）③板块与大盘 ④下午开盘三情景（高开/平开/低开）怎么操作（关键位、减仓/加仓/止损）。输出 300-500 字，分节：一、上午走势 二、公告与板块 三、下午开盘策略（三情景）四、一句话。";
+      return common + "现在做「午间简报」：①上午走势结构（高低/均价/量能/分时节奏）②午间公告（仅在有数据时写）③板块与大盘（仅在有数据时写）④下午开盘三情景（高开/平开/低开）怎么操作（关键位、减仓/加仓/止损）。输出 300-500 字，分节：一、上午走势 二、公告与板块（仅在有数据时写） 三、下午开盘策略（三情景） 四、一句话（含数据缺口一行，若有）。";
     }
-    return common + "现在做「盘后总结」：①今日整体走势（结构/量价/信号/洗盘出货）②板块与大盘 ③明日初步操作策略（高开/平开/低开三情景 + 关键位 + 仓位）④风险提示。输出 350-550 字，分节：一、今日总结 二、板块与大盘 三、明日策略（三情景）四、风险提示。";
+    return common + "现在做「盘后总结」：①今日整体走势（结构/量价/信号/洗盘出货）②板块与大盘（仅在有数据时写）③明日初步操作策略（高开/平开/低开三情景 + 关键位 + 仓位）④风险提示。输出 350-550 字，分节：一、今日总结 二、板块与大盘（仅在有数据时写） 三、明日策略（三情景） 四、风险提示（含数据缺口一行，若有）。";
   }
   function callDeepSeekSched(phase, ctx) {
     var key = String(st.aiKey || "").trim();
@@ -4272,7 +4279,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     }).then(function (out) {
       var ent = schedEntry();
       ent[phase] = { at: Date.now(), text: out.res.text, model: out.res.model, apiModel: out.res.apiModel,
-        manual: !!manual, dataLine: (out.ctx && out.ctx.dataLine) || "" };
+        manual: !!manual, dataLine: (out.ctx && out.ctx.dataLine) || "", gaps: (out.ctx && out.ctx.dataGaps) || [] };
       try { bumpAIStats(out.res.usage, out.res.apiModel || out.res.model); } catch (e) {}
       try { save({ aiSched: st.aiSched }); } catch (e) {}
       schedPending[phase] = false;
@@ -4337,7 +4344,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       html += '<button class="schedbtn" data-phase="' + d.key + '">' + (rec ? "重新生成" : "立即生成") + "</button>";
       if (rec && rec.text) html += '<button class="schedbtn" data-copy="' + d.key + '">复制</button>';
       html += "</div>";
-      if (rec && rec.dataLine) html += '<div class="scheddata">' + escHtml(rec.dataLine) + "</div>";
+      if (rec && (rec.dataLine || (rec.gaps && rec.gaps.length))) {
+        var dline = (rec.dataLine || "");
+        if (rec.gaps && rec.gaps.length) dline += (dline ? " · " : "") + "数据缺口：" + rec.gaps.join("、");
+        html += '<div class="scheddata">' + escHtml(dline) + "</div>";
+      }
       if (rec && rec.text) html += '<div class="schedtext">' + escHtml(rec.text) + "</div>";
       else if (rec && rec.error) html += '<div class="schedwhy">⚠ ' + escHtml(rec.error) + "（可点「立即生成」重试）</div>";
       else html += '<div class="schedwhy">' + escHtml(hasAIKey() ? d.hint : "配置 DeepSeek Key 后可用") + "</div>";
