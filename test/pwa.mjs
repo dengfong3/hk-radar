@@ -1705,5 +1705,16 @@ ok("缺失数据不传给模型", html.includes("delete ctx.announcements") && h
 ok("提示词禁止缺失小节与字段名", html.includes("正文禁止出现技术字段名") && html.includes("最多在最后加一行：数据缺口"));
 ok("数据缺口只在摘要行小字展示", html.includes("rec.gaps") && html.includes("数据缺口：") && html.includes('class="scheddata"'));
 
+
+/* ---------- 72) 无 Key 时的降级体验 ---------- */
+console.log("\n[无 Key 降级]");
+ok("无 Key 时 AI 卡折叠为一行", html.includes('id="aiOpenCfg"') && html.includes("collapsed") && html.includes("未配置 AI"));
+ok("折叠可展开配置", html.includes("aiSetupOpen") && html.includes("收起"));
+ok("无 Key 定时简报显示规则版", html.includes("function ruleSchedText") && html.includes("【盘前简报 · 规则版】") && html.includes("规则版 · 按当前数据"));
+ok("规则版有盘前/午间/盘后", html.includes("盘前简报 · 规则版") && html.includes("午间简报 · 规则版") && html.includes("盘后简报 · 规则版"));
+ok("规则版可复制", html.includes("data-rule-copy") && html.includes("ruleSchedText(rc2)"));
+ok("无 Key 不自动调用 AI", html.includes("maybeSchedBriefs") && html.includes("if (!hasAIKey()) return"));
+ok("配置后切换 AI 深度版说明", html.includes("配置 Key 后自动切换为 AI 深度简报"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

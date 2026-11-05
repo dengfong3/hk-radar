@@ -216,9 +216,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
 #aiTopCard{margin:0 0 9px;padding:8px 10px;border-radius:10px;
   background:rgba(17,26,43,.985);border:1px solid var(--line)}
-#aiTopCard .aihead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+#aiTopCard .aihead{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
 #aiTopCard .aihead b{font-size:12.5px}
-#aiTopCard #aiTopStatus{font-size:10px;margin-left:auto;color:var(--dim);border:1px solid var(--line);
+#aiTopCard #aiTopStatus{font-size:10px;color:var(--dim);border:1px solid var(--line);
   border-radius:8px;padding:0 6px;white-space:nowrap}
 #aiTopCard.ok{border-color:#1f6f5a}
 #aiTopCard.busy{border-color:#38bdf8}
@@ -231,6 +231,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 #aiTopCard .airow button:hover{border-color:var(--accent)}
 #aiTopCard .ailbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap}
 #aiTopCard .ailbl input[type="checkbox"]{width:14px;height:14px;flex:0 0 auto;margin:0;padding:0;accent-color:var(--accent)}
+#aiTopCard .aiopen{margin-left:auto;border:1px solid var(--line);background:var(--card2);color:var(--dim);
+  border-radius:7px;font-size:10.5px;padding:1px 8px;cursor:pointer}
+#aiTopCard .aiopen:hover{color:var(--txt);border-color:var(--accent)}
+#aiTopCard.collapsed{padding:7px 10px}
+#aiTopCard.collapsed .airow,#aiTopCard.collapsed .ainote,#aiTopCard.collapsed .aistats{display:none}
+#aiTopCard.collapsed #aiTopStatus{color:var(--dim)}
 #aiTopCard .ainote{font-size:10.5px;line-height:1.45;margin-top:5px;color:#fcd34d}
 #aiTopCard .aistats{font-size:10.5px;line-height:1.5;margin-top:4px;color:var(--dim2)}
 #aiTopCard .aistats button{border:1px solid var(--line);background:var(--card2);color:var(--dim);
@@ -289,7 +295,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <button class="tb" id="btnEvent" title="重大利空开关：确认后所有价格规则让位，直接清仓">⚠</button>
 </div>
 <div id="aiTopCard" class="card aipanel">
-  <div class="aihead"><b>AI 深度分析（DeepSeek）</b><span id="aiTopStatus">普通模式</span></div>
+  <div class="aihead"><b>AI 深度分析（DeepSeek）</b><span id="aiTopStatus">普通模式</span><button class="aiopen" id="aiOpenCfg">配置</button></div>
   <div class="airow">
     <input id="aiKey" type="password" placeholder="DeepSeek API Key（仅存本机，sk-...）" autocomplete="off">
     <input id="aiModel" class="aimodel" placeholder="deepseek-v4.1-flash" autocomplete="off">
@@ -3384,7 +3390,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.75 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.76 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4311,10 +4317,78 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       return;
     }
   }
+  function ruleRefsLine() {
+    try {
+      var rc = lastRuleCtx || {}, ps = [];
+      ((rc.refs && rc.refs.reduce) || []).slice(0, 2).forEach(function (r) { if (r && r.price != null) ps.push("压力 " + fmtP(r.price)); });
+      ((rc.refs && rc.refs.add) || []).slice(0, 2).forEach(function (r) { if (r && r.price != null) ps.push("支撑 " + fmtP(r.price)); });
+      var pl = rc.plan;
+      if (pl) {
+        if (pl.reds && pl.reds.length) ps.push("止损 " + fmtP(pl.reds[0].at));
+        if (pl.takes && pl.takes.length) ps.push("减仓档 " + fmtP(pl.takes[0].lo));
+        if (pl.buys && pl.buys.length) ps.push("加仓档 " + fmtP(pl.buys[0].hi));
+      }
+      return ps.join(" / ") || "关键位数据未就绪";
+    } catch (e) { return "关键位数据未就绪"; }
+  }
+  function ruleScenarioLine() {
+    try {
+      var rc = lastRuleCtx || {};
+      var up = rc.refs && rc.refs.reduce && rc.refs.reduce[0];
+      var dn = rc.refs && rc.refs.add && rc.refs.add[0];
+      if (up && dn) {
+        return "高开接近 " + fmtP(up.price) + " 不追、等回踩均价；平开看量能与均价 " + fmtP(metrics.vwap) +
+          "；低开跌破 " + fmtP(dn.price) + " 先减仓/看止损。";
+      }
+    } catch (e) {}
+    return "高开接近压力不追、等回踩均价；平开看量能与均价；低开跌破支撑先减仓。";
+  }
+  /** 无 AI Key 时的规则版定时简报（按当前数据实时生成，不产生任何 API 调用） */
+  function ruleSchedText(phase) {
+    try {
+      if (!metrics) return "";
+      var q = (parsed && parsed.quote) || {};
+      var d = dailyData || {}, sp = lastSetup || {}, w = lastWash || {}, mp = mpData || {};
+      var nm = (q.name || "") + " " + C.displayCode(st.code);
+      var L = [];
+      if (phase === "preopen") {
+        L.push("【盘前简报 · 规则版】" + nm);
+        L.push("一、昨日结构：日线趋势 " + (d.trend || "--") + "；MA20 " + fmtP(d.ma20) + " / MA60 " + fmtP(d.ma60) +
+          "；MACD " + (d.macd ? d.macd.state : "--") + "；KDJ " + (d.kdj ? d.kdj.state : "--") +
+          "；20日区间 " + fmtP(d.low20) + "–" + fmtP(d.high20));
+        L.push("二、今日关键位：" + ruleRefsLine());
+        L.push("三、开盘三情景：" + ruleScenarioLine());
+        L.push("四、一句话：" + (sp.ok ? ("评分 " + sp.score + " " + sp.grade + "/" + (sp.side || "none") +
+          (sp.vetoes && sp.vetoes.length ? "；否决：" + sp.vetoes[0] : "；可按信号执行")) : "暂无明确信号，等待开盘量能"));
+      } else if (phase === "midday") {
+        L.push("【午间简报 · 规则版】" + nm);
+        L.push("一、上午走势：" + pctTxt(metrics.changePct) + "；高 " + fmtP(q.high) + " / 低 " + fmtP(q.low) +
+          " / 均价 " + fmtP(metrics.vwap) + "；偏离均价 " + pctTxt(metrics.vwapDevPct) +
+          "；分钟量能 " + (metrics.volRatio != null ? metrics.volRatio.toFixed(1) + "×" : "--"));
+        L.push("二、信号与洗盘：" + (sp.ok ? ("评分 " + sp.score + " " + sp.grade + "/" + (sp.side || "none")) : "无信号") +
+          "；多周期 " + (mp.bias || "--") + " " + (mp.score != null ? mp.score + "分" : "") +
+          "；" + (w.ok ? ("洗盘/出货：" + (w.verdict || "--")) : "洗盘数据不足"));
+        L.push("三、下午三情景：" + ruleScenarioLine());
+        L.push("四、关键位：" + ruleRefsLine());
+      } else {
+        L.push("【盘后简报 · 规则版】" + nm);
+        L.push("一、今日总结：收盘 " + fmtP(metrics.price) + "（" + pctTxt(metrics.changePct) + "）；开 " + fmtP(q.open) +
+          " 高 " + fmtP(q.high) + " 低 " + fmtP(q.low) + "；成交额 " + (q.turnover ? (q.turnover / 1e8).toFixed(2) + "亿" : "--") +
+          "；分钟量能 " + (metrics.volRatio != null ? metrics.volRatio.toFixed(1) + "×" : "--"));
+        L.push("二、结构与信号：日线趋势 " + (d.trend || "--") + "；MA20 " + fmtP(d.ma20) + " / MA60 " + fmtP(d.ma60) +
+          "；" + (sp.ok ? ("评分 " + sp.score + " " + sp.grade + "/" + (sp.side || "none")) : "无信号"));
+        L.push("三、明日初步策略：" + ruleScenarioLine());
+        L.push("四、关键位：" + ruleRefsLine());
+        L.push("五、风险提示：规则版简报仅供参考，不构成投资建议。");
+      }
+      return L.join("\n");
+    } catch (e) { return ""; }
+  }
   function renderSchedCard() {
     var box = $("schedBox"), meta = $("schedMeta");
     if (!box) return;
     schedRenderedAt = Date.now();
+    if (!metrics && !hasAIKey()) { box.innerHTML = '<div class="schedwhy">行情加载中…（到达后自动显示规则版简报）</div>'; if (meta) meta.textContent = "规则版"; return; }
     var defs = schedDefs();
     var ent = (st.aiSched && st.aiSched[st.code]) || null;
     var sameDay = ent && ent.date === todayKey();
@@ -4322,15 +4396,26 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var mins = now.getHours() * 60 + now.getMinutes();
     var weekday = now.getDay() >= 1 && now.getDay() <= 5;
     var done = 0;
+    var hasAI = hasAIKey();
     var html = "";
     var hintEl = $("schedHint");
     if (hintEl) {
       hintEl.style.display = "";
-      hintEl.textContent = "自动窗口（工作日）：" + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt +
-        " · 页面打开时自动，每期 1 次 AI 调用";
+      hintEl.textContent = hasAI
+        ? ("自动窗口（工作日）：" + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt + " · 页面打开时自动，每期 1 次 AI 调用")
+        : "未配置 AI：以下为规则版（按当前行情实时生成，不产生费用）；配置 Key 后自动切换为 AI 深度简报";
     }
-    if (meta) meta.textContent = hasAIKey() ? (sameDay && done > 0 ? done + "/3" : "未生成") : "需 Key";
+    if (meta) meta.textContent = hasAI ? (sameDay && done > 0 ? done + "/3" : "未生成") : "规则版";
     defs.forEach(function (d) {
+      if (!hasAI) {
+        var rtxt = ruleSchedText(d.key);
+        html += '<div class="schedblk"><div class="schedhead"><b>' + d.label + '</b><span>规则版 · 按当前数据</span><span class="sp"></span>';
+        html += '<button class="schedbtn" data-rule-copy="' + d.key + '">复制</button></div>';
+        if (rtxt) html += '<div class="schedtext">' + escHtml(rtxt) + "</div>";
+        else html += '<div class="schedwhy">行情加载中…</div>';
+        html += "</div>";
+        return;
+      }
       var rec = sameDay ? ent[d.key] : null;
       var stTxt;
       if (schedPending[d.key]) stTxt = "生成中…";
@@ -4355,11 +4440,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       html += "</div>";
     });
     box.innerHTML = html;
-    if (meta && hasAIKey()) meta.textContent = (sameDay && done > 0) ? done + "/3" : "未生成";
+    if (meta) meta.textContent = hasAI ? ((sameDay && done > 0) ? done + "/3" : "未生成") : "规则版";
     var btns = box.querySelectorAll ? box.querySelectorAll(".schedbtn") : [];
     Array.prototype.slice.call(btns || []).forEach(function (b) {
       b.addEventListener("click", function () {
         var ph = b.getAttribute("data-phase");
+        var rc2 = b.getAttribute("data-rule-copy");
+        if (rc2) {
+          try { navigator.clipboard.writeText(ruleSchedText(rc2)); b.textContent = "已复制"; setTimeout(function () { b.textContent = "复制"; }, 1200); } catch (e) {}
+          return;
+        }
         var cp = b.getAttribute("data-copy");
         if (cp) {
           var e2 = (st.aiSched && st.aiSched[st.code] && st.aiSched[st.code][cp]) || null;
@@ -4390,6 +4480,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (st.aiCode !== st.code || !st.aiAt || Date.now() - st.aiAt >= 15 * 60 * 1000) generateAIBrief(false);
   }
   function openAIConfig() {
+    st.aiSetupOpen = true;
+    try { save({ aiSetupOpen: true }); } catch (e) {}
+    try { updateAITop(); } catch (e) {}
     var card = $("aiTopCard");
     if (card) { try { card.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {} }
     setTimeout(function () { var k = $("aiKey"); if (k) try { k.focus(); } catch (e) {} }, 300);
@@ -4398,7 +4491,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var card = $("aiTopCard"), stt = $("aiTopStatus"), note = $("aiTopNote");
     if (!card) return;
     var has = hasAIKey();
-    card.className = "card aipanel" + (aiBusy ? " busy" : has ? " ok" : "");
+    var collapsed = !has && st.aiSetupOpen !== true;
+    card.className = "card aipanel" + (aiBusy ? " busy" : has ? " ok" : "") + (collapsed ? " collapsed" : "");
+    var cfgBtn = $("aiOpenCfg");
+    if (cfgBtn) {
+      cfgBtn.style.display = has ? "none" : "";
+      cfgBtn.textContent = collapsed ? "配置" : "收起";
+    }
     var last = "";
     if (has && st.aiAt) {
       var d = new Date(st.aiAt);
@@ -4406,7 +4505,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       var mm = d.getMinutes() < 10 ? "0" + d.getMinutes() : d.getMinutes();
       last = "上次 " + hh + ":" + mm + (st.aiModelUsed ? " · " + st.aiModelUsed : "");
     }
-    if (stt) stt.textContent = aiBusy ? "分析中…" : has ? (last || "已配置") : "普通模式";
+    if (stt) stt.textContent = aiBusy ? "分析中…" : has ? (last || "已配置") : (collapsed ? "未配置 AI" : "普通模式");
     if (note) {
       if (aiBusy) note.textContent = "🤖 AI 正在分析全部卡片，请稍候…";
       else if (has) {
@@ -4504,6 +4603,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (g) g.addEventListener("click", function () { generateAIBrief(true); });
     var tt = $("aiTest");
     if (tt) tt.addEventListener("click", function () { testAIKey(); });
+    var oc = $("aiOpenCfg");
+    if (oc) oc.addEventListener("click", function () {
+      st.aiSetupOpen = !(st.aiSetupOpen === true);
+      try { save({ aiSetupOpen: st.aiSetupOpen }); } catch (e) {}
+      try { updateAITop(); } catch (e) {}
+      if (st.aiSetupOpen) setTimeout(function () { var k = $("aiKey"); if (k) try { k.focus(); } catch (e) {} }, 120);
+    });
     var ck = $("aiClearKey");
     if (ck) ck.addEventListener("click", function () {
       if (!confirm("确定清除本机保存的 DeepSeek Key？清除后回到机器简报模式。")) return;
@@ -6351,7 +6457,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { if (st.anaCode !== st.code || !st.anaAt || Date.now() - st.anaAt >= 15 * 60 * 1000) renderAnalysisCard(); } catch (e) { /* 简报失败不阻塞 */ }
         try { maybeAIRealtime(); } catch (e) { /* AI 失败不阻塞 */ }
         try { maybeSchedBriefs(); } catch (e) { /* 定时简报失败不阻塞 */ }
-        try { if (Date.now() - schedRenderedAt > 30000) renderSchedCard(); } catch (e) {}
+        try { renderSchedCard(); } catch (e) {}
         try { paintAINotes(); } catch (e) { /* AI 解读失败不阻塞 */ }
         try {
           if (st.watch.length > 1 && Date.now() - multiLiveAt > 15000) fetchMultiLive();
