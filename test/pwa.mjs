@@ -1671,7 +1671,14 @@ ok("事件触发逻辑覆盖价格/均价/量能/信号/洗盘/档位/大盘/异
 ok("仅交易时段 + 最短间隔", html.includes("marketPhase(new Date(), st.code) !== \"open\"") && html.includes("aiMinGapMs"));
 ok("页面不可见时不调用", html.includes("document.hidden"));
 ok("AI 结论变化弹窗提示", html.includes("notifyAIAction") && html.includes("AI 实时提示"));
-ok("关闭实时退回15分钟自动", html.includes("st.aiRealtime === false") && html.includes("maybeAIBrief()"));
+ok("默认15分钟自动（实时需主动勾选）", html.includes("st.aiRealtime !== true") && html.includes("maybeAIBrief()") && html.includes("rt.checked = st.aiRealtime === true"));
+
+
+/* ---------- 68) 卡片内手动 AI 按钮 ---------- */
+console.log("\n[卡片内手动 AI]");
+ok("每张卡片有立即 AI 分析按钮", html.includes("aiquick") && html.includes("立即 AI 分析（手动调用 DeepSeek 一次"));
+ok("点击即调用一次 DeepSeek", html.includes("generateAIBrief(true)") && html.includes("刷新全部卡片"));
+ok("无 AI 结果也可手动触发", html.includes("!qk0 && hasAIKey()"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

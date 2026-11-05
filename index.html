@@ -257,6 +257,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 .sinote{margin:0 0 5px;font-size:12px;line-height:1.58;color:#d1fae5;background:rgba(16,185,129,.12);
   border-left:3px solid #34d399;padding:7px 9px;border-radius:6px;white-space:pre-wrap;font-weight:500}
 .airuletoggle{font-size:10px;color:#7c8aa0;margin:1px 0 5px;cursor:pointer;user-select:none}
+.aiquick{display:inline-block;font-size:10px;color:#7dd3fc;border:1px dashed #2b4a6b;border-radius:6px;
+  padding:1px 7px;margin:3px 0 2px;cursor:pointer;user-select:none}
+.aiquick:hover{border-color:var(--accent);color:#bae6fd}
 .airuletoggle:hover{color:#a9b6c9}
 .airulehide > *:not(.sinote):not(.airuletoggle){display:none}
 .aibrieftext{white-space:pre-wrap;font-size:12.5px;line-height:1.62;color:#e7ecf3;margin:2px 0 6px}
@@ -3364,7 +3367,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.70 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.71 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3889,6 +3892,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (!txt) {
         if (note && note.parentNode) note.parentNode.removeChild(note);
         if (tg && tg.parentNode) tg.parentNode.removeChild(tg);
+        var qk0 = box.querySelector ? box.querySelector(".aiquick") : null;
+        if (!qk0 && hasAIKey()) {
+          qk0 = document.createElement("div");
+          qk0.className = "aiquick";
+          qk0.textContent = "🔄 立即 AI 分析（手动调用 DeepSeek 一次）";
+          qk0.addEventListener("click", function () { generateAIBrief(true); });
+          box.appendChild(qk0);
+        }
         // 恢复被折叠的规则内容（用内联样式，不用持久 class，避免重渲染后被"永久隐藏"）
         Array.prototype.slice.call(box.children).forEach(function (ch) {
           if (ch && ch.getAttribute && ch.getAttribute("data-airule-disp") != null) {
@@ -3917,6 +3928,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       }
       note.textContent = "🤖 AI：" + String(txt).replace(/\*\*/g, "");
       applyRuleVisibility(box, tg, key);
+      /* 手动 AI 刷新按钮（每张卡片都有；点一下立即调用一次 DeepSeek） */
+      var quick = box.querySelector ? box.querySelector(".aiquick") : null;
+      if (!quick) {
+        quick = document.createElement("div");
+        quick.className = "aiquick";
+        quick.textContent = "🔄 立即 AI 分析（手动调用 DeepSeek 一次，刷新全部卡片）";
+        quick.title = "立即调用 DeepSeek 做一次深度分析（约消耗 1 次请求）";
+        quick.addEventListener("click", function () { generateAIBrief(true); });
+        box.appendChild(quick);
+      }
     }
   }
   function rerenderForAINotes() {
@@ -4071,7 +4092,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   /** 实时跟踪主入口：交易时段内按事件触发；关闭实时时退回 15 分钟自动 */
   function maybeAIRealtime() {
     if (!hasAIKey()) return;
-    if (st.aiRealtime === false) { maybeAIBrief(); return; }
+    if (st.aiRealtime !== true) { maybeAIBrief(); return; }   // 默认 15 分钟自动；勾选「实时跟踪」才事件触发
     if (aiBusy) return;
     if (typeof document !== "undefined" && document.hidden) return;   // 页面不可见时不实时调用，省费用
     if (!metrics || metricsCode !== st.code) return;
@@ -4113,7 +4134,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         if (st.aiUsage && st.aiUsage.total_tokens != null) extra += " · tokens " + st.aiUsage.total_tokens;
         else if (st.aiUsage && st.aiUsage.prompt_tokens != null) extra += " · tokens " + ((st.aiUsage.prompt_tokens || 0) + (st.aiUsage.completion_tokens || 0));
         var rtTxt;
-        if (st.aiRealtime !== false) {
+        if (st.aiRealtime === true) {
           var gapS = Math.round((st.aiMinGapMs || 90000) / 1000);
           var trig = "";
           if (st.aiTriggerReason) {
@@ -4122,7 +4143,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           }
           rtTxt = "实时跟踪中：价格波动≥0.4%、量能≥2.2×、信号/洗盘变化、接近买卖档、大盘±0.3% 会自动分析（最短 " + gapS + " 秒/次，仅交易时段）" + trig;
         } else {
-          rtTxt = "自动模式：每 15 分钟分析一次（勾选「实时跟踪」可改为事件触发）";
+          rtTxt = "默认模式：每 15 分钟自动分析一次；想看更快的，点各卡片里的「🔄 立即 AI 分析」马上调用，或勾选「实时跟踪」改为事件触发";
         }
         note.textContent = "已配置 Key（" + maskKey(String(st.aiKey)) + "）" + extra + "；" + rtTxt +
           "。若后台无记录，请核对后台 API Key 是否与此 Key 一致。";
@@ -4191,7 +4212,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     if (a) a.addEventListener("change", function () { st.aiAuto = !!a.checked; save({ aiAuto: st.aiAuto }); });
     var rt = $("aiRealtime");
     if (rt) {
-      rt.checked = st.aiRealtime !== false;
+      rt.checked = st.aiRealtime === true;
       rt.addEventListener("change", function () {
         st.aiRealtime = !!rt.checked;
         save({ aiRealtime: st.aiRealtime });
