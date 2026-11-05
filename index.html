@@ -260,6 +260,17 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
 .airuletoggle:hover{color:#a9b6c9}
 .airulehide > *:not(.sinote):not(.airuletoggle){display:none}
+#schedBox .schedblk{border:1px solid var(--line2);border-radius:8px;padding:7px 9px;margin:6px 0;background:var(--card2)}
+#schedBox .schedhead{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:4px}
+#schedBox .schedhead b{font-size:12px}
+#schedBox .schedhead span{font-size:10px;color:var(--dim2)}
+#schedBox .schedhead .sp{flex:1 1 auto}
+#schedBox .schedbtn{border:1px solid var(--line);background:var(--card);color:var(--txt);border-radius:7px;
+  font-size:10.5px;padding:2px 8px;cursor:pointer}
+#schedBox .schedbtn:hover{border-color:var(--accent)}
+#schedBox .scheddata{font-size:10px;color:#93c5fd;margin:2px 0 5px;line-height:1.45}
+#schedBox .schedtext{white-space:pre-wrap;font-size:11.5px;line-height:1.6;color:#e2e8f0}
+#schedBox .schedwhy{font-size:10.5px;color:var(--dim2);line-height:1.5}
 .aibrieftext{white-space:pre-wrap;font-size:12.5px;line-height:1.62;color:#e7ecf3;margin:2px 0 6px}
 .aibriefrisk{color:#fca5a5}
 .rulepre{white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit}
@@ -370,6 +381,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="sigbox" id="anaBox"></div>
   <div class="hint" id="aiOutHint" style="display:none"></div>
   <div id="aiOut" style="white-space:pre-wrap;font-size:11px;line-height:1.5;color:#cbd5e1"></div>
+</div>
+
+<div class="card">
+  <div class="card-title"><b>定时深度简报（盘前 / 午间 / 盘后）</b><span class="sp"></span><span id="schedMeta" style="font-size:10px"></span></div>
+  <div class="hint" id="schedHint" style="display:none"></div>
+  <div class="sigbox" id="schedBox"></div>
 </div>
 
 <div class="card">
@@ -3365,7 +3382,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.72 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.73 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4068,6 +4085,273 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     } catch (e) { /* 弹窗失败不影响 */ }
   }
   /** 实时跟踪主入口：交易时段内按事件触发；关闭实时时退回 15 分钟自动 */
+  /* ---------- 定时深度简报（盘前 / 午间 / 盘后，工作日） ---------- */
+  var schedPending = {}, schedRenderedAt = 0;
+  function hhmmOf(ms) {
+    var d = new Date(ms);
+    var h = d.getHours(), m = d.getMinutes();
+    return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+  }
+  function schedDefs() {
+    var hk = C.marketOf(st.code) === "hk";
+    if (hk) return [
+      { key: "preopen", label: "盘前简报", due: 9 * 60, until: 9 * 60 + 30, dueTxt: "09:00", untilTxt: "09:30",
+        hint: "交易日 09:00–09:30 自动生成：隔夜外盘/美股、昨日结构、公告、今开策略" },
+      { key: "midday", label: "午间简报", due: 12 * 60 + 5, until: 13 * 60, dueTxt: "12:05", untilTxt: "13:00",
+        hint: "交易日 12:05–13:00 自动生成：上午走势、午间公告、下午开盘策略" },
+      { key: "postclose", label: "盘后简报", due: 16 * 60 + 5, until: 17 * 60 + 30, dueTxt: "16:05", untilTxt: "17:30",
+        hint: "交易日 16:05–17:30 自动生成：今日总结 + 明日初步策略" }
+    ];
+    return [
+      { key: "preopen", label: "盘前简报", due: 9 * 60, until: 9 * 60 + 30, dueTxt: "09:00", untilTxt: "09:30",
+        hint: "交易日 09:00–09:30 自动生成：隔夜外盘/美股/A50、昨日结构、公告、今开策略" },
+      { key: "midday", label: "午间简报", due: 11 * 60 + 35, until: 13 * 60, dueTxt: "11:35", untilTxt: "13:00",
+        hint: "交易日 11:35–13:00 自动生成：上午走势、午间公告、下午开盘策略" },
+      { key: "postclose", label: "盘后简报", due: 15 * 60 + 5, until: 16 * 60 + 30, dueTxt: "15:05", untilTxt: "16:30",
+        hint: "交易日 15:05–16:30 自动生成：今日总结 + 明日初步策略" }
+    ];
+  }
+  function schedEntry() {
+    var today = todayKey();
+    st.aiSched = st.aiSched || {};
+    var ent = st.aiSched[st.code];
+    if (!ent || ent.date !== today) {
+      ent = { date: today };
+      st.aiSched[st.code] = ent;
+      // 只保留最近 3 个交易日
+      var keys = Object.keys(st.aiSched);
+      if (keys.length > 5) { st.aiSched = {}; st.aiSched[st.code] = ent; }
+    }
+    return ent;
+  }
+  function fetchOvernightCtx() {
+    return fetch("https://qt.gtimg.cn/q=usDJI,usIXIC,usINX,hf_CHA50CFD", { cache: "no-store" })
+      .then(function (r) { return r.arrayBuffer(); })
+      .then(function (buf) {
+        var txt = C.decodeText(buf, "gbk");
+        var out = [];
+        String(txt).split(";").forEach(function (part) {
+          var m = /v_([A-Za-z0-9_]+)="([^"]*)"/.exec(part);
+          if (!m) return;
+          var f = m[2].split("~");
+          var code = m[1], name = f[1] || code;
+          if (/[\uFFFD]/.test(name)) name = code;
+          var price = parseFloat(f[3]), prev = parseFloat(f[4]), pct = parseFloat(f[32]);
+          if (!isFinite(pct) && isFinite(price) && isFinite(prev) && prev) pct = (price - prev) / prev * 100;
+          if (!isFinite(price)) return;
+          out.push({ code: code, name: name, price: price, chgPct: isFinite(pct) ? pct : null });
+        });
+        return out;
+      })
+      .catch(function () { return null; });
+  }
+  function fetchAnnouncementsCtx(code) {
+    if (C.marketOf(code) === "hk") return Promise.resolve(null);
+    var digits = String(code).replace(/^(sh|sz|bj)/, "");
+    var url = "https://np-anotice-stock.eastmoney.com/api/security/ann?sr=-1&page_size=6&page_index=1&ann_type=A&client_source=web&stock_list=" + digits;
+    return fetch(url, { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var list = (j && j.data && j.data.list) || [];
+        return list.slice(0, 6).map(function (x) {
+          return { date: String(x.notice_date || "").slice(0, 10), title: String(x.title || "") };
+        }).filter(function (x) { return x.title; });
+      })
+      .catch(function () { return null; });
+  }
+  function schedDataLine(phase, extras) {
+    var bits = [];
+    if (extras.overnight && extras.overnight.length) {
+      bits.push("隔夜：" + extras.overnight.slice(0, 4).map(function (x) {
+        return (x.name || x.code) + " " + (x.chgPct == null ? "--" : (x.chgPct >= 0 ? "+" : "") + x.chgPct.toFixed(2) + "%");
+      }).join(" / "));
+    }
+    if (extras.announcements && extras.announcements.length) bits.push("公告 " + extras.announcements.length + " 条");
+    if (extras.sector && extras.sector.board) bits.push("板块：" + extras.sector.board.name + " " + (extras.sector.board.chgPct == null ? "--" : (extras.sector.board.chgPct >= 0 ? "+" : "") + extras.sector.board.chgPct.toFixed(2) + "%"));
+    if (extras.market && extras.market.length) bits.push("大盘：" + extras.market.slice(0, 3).map(function (x) { return x.name + " " + (x.chgPct >= 0 ? "+" : "") + x.chgPct.toFixed(2) + "%"; }).join(" / "));
+    return bits.join(" · ");
+  }
+  function buildSchedContext(phase, extras) {
+    var q = (parsed && parsed.quote) || {};
+    var points = allPointsNow();
+    var pos = curPos();
+    var rc = lastRuleCtx || {};
+    var mp = mpData || {};
+    var ctx = {
+      asOf: new Date().toISOString(), phase: phase,
+      stock: {
+        code: C.displayCode(st.code), name: q.name || "", market: C.marketOf(st.code) === "cn" ? "A股" : "港股",
+        price: metrics.price, chgPct: metrics.changePct, open: q.open, high: q.high, low: q.low, prevClose: q.prevClose,
+        vwap: metrics.vwap, vwapDevPct: metrics.vwapDevPct,
+        dayPosPct: (q.high > q.low) ? (metrics.price - q.low) / (q.high - q.low) * 100 : null,
+        turnoverYi: q.turnover ? q.turnover / 1e8 : null
+      },
+      daily: dailyData ? {
+        trend: dailyData.trend, ma20: dailyData.ma20, ma60: dailyData.ma60,
+        macd: dailyData.macd, kdj: dailyData.kdj, low20: dailyData.low20, high20: dailyData.high20,
+        lastBars: (dailyData.lastBars || []).slice(-6)
+      } : null,
+      multiPeriod: { bias: mp.bias, score: mp.score, valid: mp.valid },
+      setup: lastSetup, wash: lastWash, plan: rc.plan, refs: rc.refs,
+      position: (pos.shares > 0 && pos.cost > 0) ? { shares: pos.shares, cost: pos.cost, pnlPct: (metrics.price / pos.cost - 1) * 100 } : null,
+      sector: extras.sector, market: extras.market, overnight: extras.overnight, announcements: extras.announcements,
+      dataLine: schedDataLine(phase, extras)
+    };
+    if (points && points.length) {
+      ctx.session = { high: q.high, low: q.low, vwap: metrics.vwap, chgPct: metrics.changePct, points: points.slice(-60).map(function (x) { return x.hhmm + " " + x.price; }) };
+    }
+    if (phase === "postclose" || phase === "midday") {
+      ctx.segments = [];
+      for (var i = Math.max(0, points.length - 8 * 15); i < points.length; i += 15) {
+        var ch = points.slice(i, i + 15);
+        if (ch.length) ctx.segments.push(ch[0].hhmm + "–" + ch[ch.length - 1].hhmm + " 收 " + ch[ch.length - 1].price);
+      }
+    }
+    return ctx;
+  }
+  function schedSystemPrompt(phase) {
+    var common = "你是A股/港股交易策略助手，只依据用户提供的实时数据与公告/外盘数据分析，禁止编造新闻、公告或数据；数据缺失要明确说明。必须给出可执行的价格位与情景应对，不承诺收益，不构成投资建议。\n";
+    if (phase === "preopen") {
+      return common + "现在做「盘前简报」：①隔夜外盘（美股/A50 等，若提供）对A股/港股情绪的影响 ②昨日收盘结构（趋势/均线/MACD/KDJ/20日区间/量价）③盘前公告（若提供）对个股的影响 ④所属板块与概念 ⑤今日开盘三情景（高开/平开/低开）分别怎么操作（关键位、减仓/加仓/止损、仓位建议）。输出 350-550 字，分节：一、隔夜与外盘 二、昨日结构 三、公告与板块 四、今日开盘策略（三情景）五、一句话。";
+    }
+    if (phase === "midday") {
+      return common + "现在做「午间简报」：①上午走势结构（高低/均价/量能/分时节奏）②午间公告（若提供）③板块与大盘 ④下午开盘三情景（高开/平开/低开）怎么操作（关键位、减仓/加仓/止损）。输出 300-500 字，分节：一、上午走势 二、公告与板块 三、下午开盘策略（三情景）四、一句话。";
+    }
+    return common + "现在做「盘后总结」：①今日整体走势（结构/量价/信号/洗盘出货）②板块与大盘 ③明日初步操作策略（高开/平开/低开三情景 + 关键位 + 仓位）④风险提示。输出 350-550 字，分节：一、今日总结 二、板块与大盘 三、明日策略（三情景）四、风险提示。";
+  }
+  function callDeepSeekSched(phase, ctx) {
+    var key = String(st.aiKey || "").trim();
+    if (!key) return Promise.reject(new Error("请先配置 DeepSeek API Key"));
+    var model = String(st.aiModel || "deepseek-v4.1-flash").trim();
+    var user = "请基于以下数据做" + (phase === "preopen" ? "盘前" : phase === "midday" ? "午间" : "盘后") + "简报（json 输入）：\n" + JSON.stringify(ctx);
+    function once(mdl) {
+      var t0 = Date.now();
+      return fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+        body: JSON.stringify({
+          model: mdl, temperature: 0.3, max_tokens: 1400,
+          messages: [{ role: "system", content: schedSystemPrompt(phase) }, { role: "user", content: user }]
+        })
+      }).then(function (r) {
+        return r.text().then(function (t) {
+          var j = null;
+          try { j = JSON.parse(t); } catch (e) {}
+          if (!r.ok) {
+            var msg = (j && j.error && j.error.message) || t.slice(0, 200) || ("HTTP " + r.status);
+            var err = new Error(msg); err.status = r.status; throw err;
+          }
+          var c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+          if (!c) throw new Error("AI 返回为空");
+          return { text: String(c).trim(), model: mdl, apiModel: (j && j.model) || mdl, usage: (j && j.usage) || null, ms: Date.now() - t0 };
+        });
+      });
+    }
+    return once(model).catch(function (e) {
+      if (e && (e.status === 400 || e.status === 404) && /model/i.test(String(e.message))) return once("deepseek-chat");
+      throw e;
+    });
+  }
+  function generateSchedBrief(phase, manual) {
+    if (schedPending[phase]) return;
+    if (!hasAIKey()) { try { updateAITop(); } catch (e) {} return; }
+    if (!metrics || metricsCode !== st.code) return;
+    schedPending[phase] = true;
+    try { renderSchedCard(); } catch (e) {}
+    var jobs = [];
+    jobs.push(fetchSectorCtx(st.code).catch(function () { return null; }));
+    jobs.push(fetchMarketCtx().catch(function () { return []; }));
+    jobs.push(phase === "preopen" ? fetchOvernightCtx() : Promise.resolve(null));
+    jobs.push(fetchAnnouncementsCtx(st.code));
+    Promise.all(jobs).then(function (arr) {
+      var extras = { sector: arr[0], market: arr[1], overnight: arr[2], announcements: arr[3] };
+      var ctx = buildSchedContext(phase, extras);
+      return callDeepSeekSched(phase, ctx).then(function (res) { return { res: res, ctx: ctx }; });
+    }).then(function (out) {
+      var ent = schedEntry();
+      ent[phase] = { at: Date.now(), text: out.res.text, model: out.res.model, apiModel: out.res.apiModel,
+        manual: !!manual, dataLine: (out.ctx && out.ctx.dataLine) || "" };
+      try { bumpAIStats(out.res.usage, out.res.apiModel || out.res.model); } catch (e) {}
+      try { save({ aiSched: st.aiSched }); } catch (e) {}
+      schedPending[phase] = false;
+      try { renderSchedCard(); } catch (e) {}
+      try { updateAITop(); } catch (e) {}
+    }).catch(function (e) {
+      schedPending[phase] = false;
+      var ent = schedEntry();
+      ent[phase] = { at: Date.now(), error: String(e && e.message ? e.message : e), manual: !!manual };
+      try { save({ aiSched: st.aiSched }); } catch (e2) {}
+      try { renderSchedCard(); } catch (e2) {}
+    });
+  }
+  function maybeSchedBriefs() {
+    if (!hasAIKey()) return;
+    if (st.schedAuto === false) return;
+    var now = new Date();
+    if (now.getDay() === 0 || now.getDay() === 6) return;
+    var mins = now.getHours() * 60 + now.getMinutes();
+    var ent = (st.aiSched && st.aiSched[st.code]) || null;
+    var sameDay = ent && ent.date === todayKey();
+    var defs = schedDefs();
+    for (var i = 0; i < defs.length; i++) {
+      var d = defs[i];
+      if (mins < d.due || mins > d.until) continue;
+      if (sameDay && ent[d.key]) continue;
+      if (schedPending[d.key]) continue;
+      generateSchedBrief(d.key, false);
+      return;
+    }
+  }
+  function renderSchedCard() {
+    var box = $("schedBox"), meta = $("schedMeta");
+    if (!box) return;
+    schedRenderedAt = Date.now();
+    var defs = schedDefs();
+    var ent = (st.aiSched && st.aiSched[st.code]) || null;
+    var sameDay = ent && ent.date === todayKey();
+    var now = new Date();
+    var mins = now.getHours() * 60 + now.getMinutes();
+    var weekday = now.getDay() >= 1 && now.getDay() <= 5;
+    var done = 0;
+    var html = "";
+    if (meta) meta.textContent = hasAIKey() ? (sameDay ? "自动窗口：工作日 " + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt : "自动窗口：" + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt) : "需要 AI Key";
+    defs.forEach(function (d) {
+      var rec = sameDay ? ent[d.key] : null;
+      var stTxt;
+      if (schedPending[d.key]) stTxt = "生成中…";
+      else if (rec && rec.error) stTxt = "生成失败：" + rec.error;
+      else if (rec) { done++; stTxt = "已生成 " + hhmmOf(rec.at) + (rec.manual ? "（手动）" : "（自动）"); }
+      else if (!weekday) stTxt = "周末不自动生成";
+      else if (mins < d.due) stTxt = "未到时间（" + d.dueTxt + " 自动）";
+      else if (mins <= d.until) stTxt = "等待自动生成（窗口至 " + d.untilTxt + "）";
+      else stTxt = "已错过自动窗口，可手动生成";
+      html += '<div class="schedblk"><div class="schedhead"><b>' + d.label + '</b><span>' + stTxt + "</span><span class=\"sp\"></span>";
+      html += '<button class="schedbtn" data-phase="' + d.key + '">' + (rec ? "重新生成" : "立即生成") + "</button>";
+      if (rec && rec.text) html += '<button class="schedbtn" data-copy="' + d.key + '">复制</button>';
+      html += "</div>";
+      if (rec && rec.dataLine) html += '<div class="scheddata">' + escHtml(rec.dataLine) + "</div>";
+      if (rec && rec.text) html += '<div class="schedtext">' + escHtml(rec.text) + "</div>";
+      else if (rec && rec.error) html += '<div class="schedwhy">⚠ ' + escHtml(rec.error) + "（可点「立即生成」重试）</div>";
+      else html += '<div class="schedwhy">' + escHtml(hasAIKey() ? d.hint : "配置 DeepSeek Key 后可用") + "</div>";
+      html += "</div>";
+    });
+    box.innerHTML = html;
+    if (meta && hasAIKey() && sameDay) meta.textContent = "今日已生成 " + done + "/3 · 自动窗口 " + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt;
+    var btns = box.querySelectorAll ? box.querySelectorAll(".schedbtn") : [];
+    Array.prototype.slice.call(btns || []).forEach(function (b) {
+      b.addEventListener("click", function () {
+        var ph = b.getAttribute("data-phase");
+        var cp = b.getAttribute("data-copy");
+        if (cp) {
+          var e2 = (st.aiSched && st.aiSched[st.code] && st.aiSched[st.code][cp]) || null;
+          if (e2 && e2.text) { try { navigator.clipboard.writeText(e2.text); b.textContent = "已复制"; setTimeout(function () { b.textContent = "复制"; }, 1200); } catch (e) {} }
+          return;
+        }
+        if (ph) generateSchedBrief(ph, true);
+      });
+    });
+  }
+
   function maybeAIRealtime() {
     if (!hasAIKey()) return;
     if (st.aiRealtime !== true) { maybeAIBrief(); return; }   // 默认 15 分钟自动；勾选「实时跟踪」才事件触发
@@ -6047,6 +6331,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
         try { if (st.anaCode !== st.code || !st.anaAt || Date.now() - st.anaAt >= 15 * 60 * 1000) renderAnalysisCard(); } catch (e) { /* 简报失败不阻塞 */ }
         try { maybeAIRealtime(); } catch (e) { /* AI 失败不阻塞 */ }
+        try { maybeSchedBriefs(); } catch (e) { /* 定时简报失败不阻塞 */ }
+        try { if (Date.now() - schedRenderedAt > 30000) renderSchedCard(); } catch (e) {}
         try { paintAINotes(); } catch (e) { /* AI 解读失败不阻塞 */ }
         try {
           if (st.watch.length > 1 && Date.now() - multiLiveAt > 15000) fetchMultiLive();
@@ -6392,6 +6678,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   try { renderEntryCard(); } catch (e) {}
   try { renderEntryTrackCard(); } catch (e) {}
   try { initAISettings(); } catch (e) {}
+  try { renderSchedCard(); } catch (e) {}
   try { initAIFab(); } catch (e) {}
   tick(false);
   if ("serviceWorker" in navigator) {

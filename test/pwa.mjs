@@ -1680,5 +1680,16 @@ ok("仅在顶部「实时跟踪」右侧放「立即 AI 分析」", html.include
 ok("按钮顺序在实时跟踪之后", html.indexOf('id="aiRealtime"') < html.indexOf('id="aiGen"'));
 ok("点击调用一次 DeepSeek 刷新全部卡片", html.includes("generateAIBrief(true)") && html.includes("刷新全部卡片"));
 
+
+/* ---------- 69) 定时深度简报（盘前/午间/盘后） ---------- */
+console.log("\n[定时深度简报]");
+ok("定时简报卡片", html.includes('id="schedBox"') && html.includes("定时深度简报（盘前 / 午间 / 盘后）"));
+ok("工作日三个自动窗口", html.includes("function schedDefs") && html.includes("11 * 60 + 35") && html.includes("15 * 60 + 5"));
+ok("盘前简报含隔夜外盘/公告", html.includes("fetchOvernightCtx") && html.includes("usDJI") && html.includes("fetchAnnouncementsCtx") && html.includes("np-anotice-stock"));
+ok("提示词覆盖三情景与公告", html.includes("高开/平开/低开") && html.includes("公告"));
+ok("自动生成仅工作日且窗口内", html.includes("function maybeSchedBriefs") && html.includes("getDay") && html.includes("d.until"));
+ok("手动生成/复制按钮", html.includes("data-phase") && html.includes("data-copy") && html.includes("generateSchedBrief"));
+ok("简报注明不构成投资建议", html.includes("不构成投资建议"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
