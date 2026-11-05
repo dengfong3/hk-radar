@@ -3391,7 +3391,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.77 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.78 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3710,12 +3710,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       market: market || [],
       marketVsStock: (indexData && indexData.pct != null && metrics.changePct != null)
         ? { benchmark: indexData.code, benchmarkChgPct: indexData.pct, relativePct: metrics.changePct - indexData.pct } : null,
-      ruleSummary: lastRuleBrief
+      ruleSummary: lastRuleBrief,
+      unified: (typeof lastUnified !== "undefined" ? lastUnified : null)
     };
   }
   function aiSystemPrompt() {
     return "你是A股/港股实时盘面分析助手，只依据用户提供的实时数据做判断，禁止编造数据；缺失就明确说明。\n" +
       "必须结合三层：①个股结构与量价 ②所属板块强弱 ③大盘环境，引用具体数字与价位，并指出矛盾点（例如个股强于板块但大盘弱）。\n" +
+      "信号口径：以输入里的 unified 为最终结论（action / buy / reasons / conflicts）。若 unified.buy 为 false，禁止给出买入建议；若各卡片信号冲突，要明确指出并按 unified 收敛，不得各说各话。\n" +
       "只输出一个 JSON 对象（不要 markdown 代码块、不要多余文字），键如下，每个值是 60~140 字中文：\n" +
       '{"brief":"总体结论：当前适合持股/减仓/清仓/观望/建仓 + 核心理由 + 具体动作（有持仓则给股数）",' +
       '"pricePlan":"下一步买卖点：结合减仓档/加仓档/止损给出当前该做什么",' +
@@ -4630,6 +4632,68 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
   /* ---------- 智能信号（共识评分）与信号台账 ---------- */
   var lastSetup = null;
+  var lastUnified = null;
+  /** 统一信号：合并「智能信号 + 盘中异动 + 持仓」，作为所有弹窗与 AI 的最终口径 */
+  function unifiedSignal() {
+    try {
+      var sp = lastSetup || null;
+      var pos = curPos ? curPos() : { shares: 0 };
+      var out = { action: "观望", buy: false, sell: false, grade: "noTrade", score: null,
+        rr: null, stop: null, target: null, reasons: [], conflicts: [] };
+      if (!sp || !sp.ok) {
+        out.action = "观望"; out.reasons = ["信号数据不足"]; return out;
+      }
+      out.grade = sp.grade; out.score = sp.score; out.rr = sp.rr; out.stop = sp.stop; out.target = sp.target;
+      if (sp.vetoes && sp.vetoes.length) {
+        out.action = "不交易"; out.reasons = sp.vetoes.slice(0, 3);
+      } else if (sp.grade === "A" || sp.grade === "B") {
+        if (sp.side === "long") {
+          if (sp.rr != null && sp.rr < 2) { out.action = "不交易"; out.reasons = ["盈亏比 " + sp.rr + " < 2"]; }
+          else { out.buy = true; out.action = sp.grade + " 级买点（等确认）"; }
+        } else if (sp.side === "reduce") {
+          out.sell = pos.shares > 0; out.action = pos.shares > 0 ? "可减仓（" + sp.grade + " 级）" : "偏空观望";
+        } else out.action = "观望";
+      } else if (sp.grade === "C") {
+        out.action = "观望（C 级无方向）"; out.reasons = ["评分不足 B 级"];
+      } else {
+        out.action = "不交易"; out.reasons = sp.vetoes && sp.vetoes.length ? sp.vetoes.slice(0, 3) : ["条件不足"];
+      }
+      // 与盘中异动的冲突检测（只提示，不放大操作）
+      var logs = st.burstLog || [];
+      var lb = logs.length ? logs[logs.length - 1] : null;
+      if (lb && lb.code === st.code && lb.side === "buy" && !out.buy) {
+        out.conflicts.push("盘中出现买点（" + (lb.kind || "触发") + "），但统一结论不允许买入：" + (out.reasons[0] || out.action));
+      }
+      return out;
+    } catch (e) { return null; }
+  }
+  function unifyBuyAllowed() {
+    var u = unifiedSignal();
+    return !!(u && u.buy);
+  }
+  /** 统一信号不允许买入时，撤销队列里尚未执行的买点弹窗，避免“卡片说不交易、弹窗说买点” */
+  function pruneBuyAlerts(code) {
+    try {
+      var before = alertQueue.length;
+      alertQueue = alertQueue.filter(function (a) {
+        var isBuy = (a.id.indexOf(":buy:") >= 0) || (a.id.indexOf(":long:") >= 0);
+        var mine = code ? a.id.indexOf(code) >= 0 : true;
+        return !(isBuy && mine);
+      });
+      if (alertQueue.length !== before) renderAlert();
+    } catch (e) {}
+  }
+  function updateUnifiedNote(u) {
+    var el = $("unifiedNote");
+    if (!el) return;
+    if (!u) { el.style.display = "none"; return; }
+    el.style.display = "";
+    var txt = "统一结论：" + u.action;
+    if (u.reasons && u.reasons.length) txt += "（" + u.reasons.slice(0, 2).join("；") + "）";
+    if (u.conflicts && u.conflicts.length) txt += " · 已屏蔽冲突提示：" + u.conflicts[0];
+    el.textContent = txt;
+    el.style.color = (u.buy || u.sell) ? "#93c5fd" : "#fca5a5";
+  }
   function recordLedger(sp) {
     if (!sp || !sp.ok) return;
     var lg = st.ledger;
@@ -5061,7 +5125,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         // 买卖点弹窗：只有"强买点"和"卖点/风控"才弹（普通试探买点只在卡片显示）
         try {
           var _gate = C.burstAlertGate(b, mpData, metrics, { market: C.marketOf(st.code), ea: lastEntryAdvice, now: new Date() });
-          if (_gate.popup) {
+          if (_gate.popup && (_gate.level !== "buy" || unifyBuyAllowed())) {
             alertOnce("burst:" + st.code + ":" + (isSell ? "sell" : "buy") + ":" + b.kind + ":" + b.at,
               _gate.level,
               (isSell ? "【关键卖点·风控】" : "【关键买点】") + b.kind + " · " + (isSell ? "卖出 " : "入场 ") + b.entry +
@@ -5290,9 +5354,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       capital: curCapital()
     });
     lastSetup = sp;
-    // 买卖点弹窗：A/B 级且方向明确时提示（30 分钟内同信号只弹一次）
+    lastUnified = unifiedSignal();
+    // 买卖点弹窗：必须通过「统一结论」（智能信号 + 异动 + 持仓一致）才弹
     try {
-      if ((sp.grade === "A" || sp.grade === "B") && (sp.side === "long" || sp.side === "reduce")) {
+      if (lastUnified && (lastUnified.buy || lastUnified.sell) && (sp.grade === "A" || sp.grade === "B") && (sp.side === "long" || sp.side === "reduce")) {
         var _d = sp.side === "long" ? "买点" : "减仓/卖点";
         var _zone = sp.entry ? (sp.entry.lo.toFixed(2) + "–" + sp.entry.hi.toFixed(2)) : ("现价 " + (metrics ? metrics.price : "--"));
         alertOnce("smart:" + st.code + ":" + sp.side + ":" + sp.grade,
@@ -5319,6 +5384,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         (sp.limit.atUp ? "涨停 " + sp.limit.up.toFixed(2) : "跌停 " + sp.limit.down.toFixed(2)) + "</span>";
     }
     html += "</div>";
+    html += '<div id="unifiedNote" class="sigwhy" style="display:none"></div>';
     if (sp.grade === "noTrade") {
       var vs = sp.vetoes.length ? sp.vetoes : ["条件不足"];
       html += '<div class="sigveto">不交易原因：' + vs.join("；") + "</div>";
@@ -6465,6 +6531,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { maybeSchedBriefs(); } catch (e) { /* 定时简报失败不阻塞 */ }
         try { renderSchedCard(); } catch (e) {}
         try { paintAINotes(); } catch (e) { /* AI 解读失败不阻塞 */ }
+        try {
+          lastUnified = unifiedSignal();
+          updateUnifiedNote(lastUnified);
+          if (!lastUnified || !lastUnified.buy) pruneBuyAlerts(st.code);
+          if (lastUnified && lastUnified.conflicts && lastUnified.conflicts.length) {
+            // 冲突只在信号卡里说明，不再额外弹“买点”误导
+            try { updateUnifiedNote(lastUnified); } catch (e2) {}
+          }
+        } catch (e) { /* 统一信号失败不阻塞 */ }
         try {
           if (st.watch.length > 1 && Date.now() - multiLiveAt > 15000) fetchMultiLive();
         } catch (e) {}

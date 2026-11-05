@@ -1723,5 +1723,15 @@ ok("悬浮菜单含「立即 AI 分析」", html.includes('id="fabGen"') && html
 ok("主操作高亮", html.includes("fabprimary") && html.includes("#aiFabMenu button.fabprimary"));
 ok("未配置时点击先展开配置", html.includes("if (!hasAIKey()) { openAIConfig(); return; }"));
 
+
+/* ---------- 74) 统一信号（消除卡片/弹窗互相矛盾） ---------- */
+console.log("\n[统一信号]");
+ok("统一信号函数", html.includes("function unifiedSignal") && html.includes("function unifyBuyAllowed"));
+ok("买点弹窗必须通过统一结论", html.includes("lastUnified.buy || lastUnified.sell") && html.includes("unifyBuyAllowed()"));
+ok("统一结论不允许买入时撤销买点弹窗", html.includes("function pruneBuyAlerts") && html.includes("pruneBuyAlerts(st.code)"));
+ok("信号卡显示统一结论", html.includes('id="unifiedNote"') && html.includes("统一结论："));
+ok("冲突会被记录并屏蔽", html.includes("盘中出现买点（") && html.includes("已屏蔽冲突提示"));
+ok("AI 以统一结论为最终口径", html.includes("以输入里的 unified 为最终结论") && html.includes("unified: (typeof lastUnified"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
