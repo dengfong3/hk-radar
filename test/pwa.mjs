@@ -1754,5 +1754,15 @@ ok("超时自动恢复", html.includes("AI 分析超时（已自动恢复）") &
 ok("成功/失败都在卡内可见", html.includes("✅ AI 完成") && html.includes("❌ AI 失败："));
 ok("超短线卡显示 AI 进度", html.includes("🤖 ") && html.includes("renderUshortCard"));
 
+
+/* ---------- 77) 建仓建议与 AI 弹窗统一口径 ---------- */
+console.log("\n[建仓建议统一]");
+ok("建仓建议不再单独弹窗", html.includes("建仓建议不再单独弹窗") && !html.includes("建仓建议（\" + (ea.suitable"));
+ok("建仓卡在统一结论否决时标注", html.includes("本卡区间仅作观察，不执行") && html.includes("买点弹窗统一由「⚡ 超短线信号」触发"));
+ok("建仓卡 meta 同步统一结论", html.includes("不建议建仓（统一结论：不交易）"));
+ok("AI 买入弹窗须服从统一结论", html.includes("if (level === \"buy\")") && html.includes("if (!_uAI || !_uAI.buy)"));
+ok("“不建议建仓”不会被误判为买入", html.includes("不建议|不宜|不可|避免|别追|不要买"));
+ok("AI 正文买入措辞受约束", html.includes("正文里不要出现“建议买入/可以建仓/小仓试”"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
