@@ -260,6 +260,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
 .airuletoggle:hover{color:#a9b6c9}
 .airulehide > *:not(.sinote):not(.airuletoggle){display:none}
+#schedBox{font-size:11px}
+#schedMeta{white-space:nowrap;flex:0 0 auto}
 #schedBox .schedblk{border:1px solid var(--line2);border-radius:8px;padding:7px 9px;margin:6px 0;background:var(--card2)}
 #schedBox .schedhead{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:4px}
 #schedBox .schedhead b{font-size:12px}
@@ -384,7 +386,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 </div>
 
 <div class="card">
-  <div class="card-title"><b>定时深度简报（盘前 / 午间 / 盘后）</b><span class="sp"></span><span id="schedMeta" style="font-size:10px"></span></div>
+  <div class="card-title"><b>定时深度简报</b><span class="sp"></span><span id="schedMeta" style="font-size:10px"></span></div>
   <div class="hint" id="schedHint" style="display:none"></div>
   <div class="sigbox" id="schedBox"></div>
 </div>
@@ -3382,7 +3384,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.73 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.74 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4314,7 +4316,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var weekday = now.getDay() >= 1 && now.getDay() <= 5;
     var done = 0;
     var html = "";
-    if (meta) meta.textContent = hasAIKey() ? (sameDay ? "自动窗口：工作日 " + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt : "自动窗口：" + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt) : "需要 AI Key";
+    var hintEl = $("schedHint");
+    if (hintEl) {
+      hintEl.style.display = "";
+      hintEl.textContent = "自动窗口（工作日）：" + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt +
+        " · 页面打开时自动，每期 1 次 AI 调用";
+    }
+    if (meta) meta.textContent = hasAIKey() ? (sameDay && done > 0 ? done + "/3" : "未生成") : "需 Key";
     defs.forEach(function (d) {
       var rec = sameDay ? ent[d.key] : null;
       var stTxt;
@@ -4336,7 +4344,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       html += "</div>";
     });
     box.innerHTML = html;
-    if (meta && hasAIKey() && sameDay) meta.textContent = "今日已生成 " + done + "/3 · 自动窗口 " + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt;
+    if (meta && hasAIKey()) meta.textContent = (sameDay && done > 0) ? done + "/3" : "未生成";
     var btns = box.querySelectorAll ? box.querySelectorAll(".schedbtn") : [];
     Array.prototype.slice.call(btns || []).forEach(function (b) {
       b.addEventListener("click", function () {
