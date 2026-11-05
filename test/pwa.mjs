@@ -1590,7 +1590,7 @@ ok("默认模型 deepseek-v4.1-flash", html.includes("deepseek-v4.1-flash"));
 ok("提示词要求板块/大盘/风险", html.includes("aiSystemPrompt") && html.includes("所属板块") && html.includes("大盘环境") && html.includes("风险提示"));
 ok("AI 简报自动触发", html.includes("maybeAIBrief") && html.includes("generateAIBrief"));
 ok("上下文含个股/板块/大盘", html.includes("buildAIContext") && html.includes("fetchSectorCtx") && html.includes("fetchMarketCtx"));
-ok("Key 只存本机", html.includes("st.aiKey") && html.includes("只保存在本机浏览器"));
+ok("Key 只存本机", html.includes("st.aiKey") && (html.includes("只保存在本机浏览器") || html.includes("只保存在本机")));
 
 
 /* ---------- 59) 无 Key 时回退到上一版机器简报 ---------- */
@@ -1743,6 +1743,16 @@ ok("T+1 时间闸门", html.includes("14:45 后不提示买入") && html.include
 ok("超短线弹窗及时提示", html.includes("function maybeUshortAlert") && html.includes("超短线买入信号（T+1）"));
 ok("旧买点弹窗停用、异动只保留卖点", html.includes("买点弹窗统一由「超短线信号」触发") && html.includes('_gate.level !== "buy"'));
 ok("无 Key 时规则版超短线可用", html.includes("规则版（未配置 AI）") && html.includes("规则买点（无 AI 确认）"));
+
+
+/* ---------- 76) 立即 AI 分析可用性（状态反馈 + 超时恢复） ---------- */
+console.log("\n[AI 按钮可用性]");
+ok("分析状态全局提示", html.includes("aiStatusMsg") && html.includes("aiStartedAt"));
+ok("点击立即给反馈", html.includes("正在启动 AI 分析…") && html.includes("AI 分析进行中…"));
+ok("网络请求有超时", html.includes("function withTimeout") && html.includes("板块数据") && html.includes("15000"));
+ok("超时自动恢复", html.includes("AI 分析超时（已自动恢复）") && html.includes("80000"));
+ok("成功/失败都在卡内可见", html.includes("✅ AI 完成") && html.includes("❌ AI 失败："));
+ok("超短线卡显示 AI 进度", html.includes("🤖 ") && html.includes("renderUshortCard"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

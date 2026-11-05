@@ -3406,7 +3406,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.79 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.80 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3611,6 +3611,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   var lastRuleBrief = "";
   var lastRuleCtx = null;
   var aiBusy = false;
+  var aiStartedAt = 0, aiStatusMsg = "";
+  /** 给网络请求加超时，避免按钮“永久卡在分析中” */
+  function withTimeout(p, ms, label) {
+    return Promise.race([p, new Promise(function (_, reject) {
+      setTimeout(function () { reject(new Error((label || "请求") + "超时")); }, ms);
+    })]);
+  }
   var sectorCache = { code: "", at: 0, data: null };
   function emSecid(code) {
     var c = String(code || "");
@@ -3979,23 +3986,43 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     try { paintAINotes(); } catch (e) {}
   }
   function generateAIBrief(manual) {
-    if (aiBusy) return;
-    var key = String(st.aiKey || "").trim();
-    var status = null, out = $("aiOut"), hint = $("aiOutHint");
-    if (!key) {
-      if (hint) { hint.style.display = ""; hint.textContent = "⚠ 未配置 DeepSeek API Key：请在下方输入（只保存在本机浏览器；建议使用限额 Key）。"; }
-      if (status) status.textContent = "未配置 Key";
+    if (aiBusy) {
+      aiStatusMsg = "AI 分析进行中…（" + (aiStartedAt ? hhmmOf(aiStartedAt) + " 开始" : "请稍候") + "）";
+      try { renderUshortCard(); updateAITop(); } catch (e) {}
       return;
     }
-    if (!metrics || metricsCode !== st.code) { if (status) status.textContent = "等待行情…"; return; }
+    var key = String(st.aiKey || "").trim();
+    var out = $("aiOut"), hint = $("aiOutHint");
+    if (!key) {
+      aiStatusMsg = "⚠ 未配置 DeepSeek API Key";
+      try { renderUshortCard(); updateAITop(); } catch (e) {}
+      if (hint) { hint.style.display = ""; hint.textContent = "⚠ 未配置 DeepSeek API Key：请在顶部 AI 卡点「配置」填入（只保存在本机）。"; }
+      return;
+    }
+    if (!metrics || metricsCode !== st.code) {
+      aiStatusMsg = "等待行情…（行情到达后可分析）";
+      try { renderUshortCard(); updateAITop(); } catch (e) {}
+      return;
+    }
     if (!lastRuleBrief) { try { renderAnalysisCard(true); } catch (e) {} }
-    aiBusy = true;
-    try { updateAITop(); } catch (e) {}
+    aiBusy = true; aiStartedAt = Date.now(); aiStatusMsg = "正在拉取板块/大盘数据…";
+    try { updateAITop(); renderUshortCard(); } catch (e) {}
+    // 超时保护：任何环节卡住 75 秒后自动恢复，按钮不会永久失效
+    setTimeout(function () {
+      if (aiBusy && aiStartedAt && Date.now() - aiStartedAt > 75000) {
+        aiBusy = false; aiStartedAt = 0;
+        aiStatusMsg = "⚠ AI 分析超时（已自动恢复），请点「立即 AI 分析」重试";
+        try { updateAITop(); renderUshortCard(); } catch (e) {}
+      }
+    }, 80000);
 
-    if (status) status.textContent = "拉取板块/大盘…";
-    Promise.all([fetchSectorCtx(st.code), fetchMarketCtx()])
+    Promise.all([
+      withTimeout(fetchSectorCtx(st.code).catch(function () { return null; }), 15000, "板块数据"),
+      withTimeout(fetchMarketCtx().catch(function () { return []; }), 15000, "大盘数据")
+    ])
       .then(function (arr) {
-        if (status) status.textContent = "AI 分析全部卡片中…";
+        aiStatusMsg = "AI 分析全部卡片中…（约 5-20 秒）";
+        try { updateAITop(); renderUshortCard(); } catch (e) {}
         return callDeepSeek(buildAIContext(arr[0], arr[1]));
       })
       .then(function (res) {
@@ -4012,7 +4039,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         var ts = new Date();
         var hh = ts.getHours() < 10 ? "0" + ts.getHours() : ts.getHours();
         var mm = ts.getMinutes() < 10 ? "0" + ts.getMinutes() : ts.getMinutes();
-        if (status) status.textContent = "AI 完成（全部卡片）" + hh + ":" + mm + " · " + res.model;
+        aiStatusMsg = "✅ AI 完成 " + hh + ":" + mm + " · " + res.model +
+          (res.usage && res.usage.total_tokens != null ? " · " + res.usage.total_tokens + " tokens" : "");
         if (hint) { hint.style.display = ""; hint.textContent = "AI 已把解读写入各卡片（绿色块）；仅作参考，不构成投资建议。"; }
         st.aiTriggerAt = Date.now();
         try { st.aiSnap = aiSnapNow(); } catch (e) {}
@@ -4023,11 +4051,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { save({ aiTriggerAt: st.aiTriggerAt, aiSnap: st.aiSnap, lastAIAction: st.lastAIAction }); } catch (e) {}
       })
       .catch(function (e) {
-        if (status) status.textContent = "AI 失败";
+        aiStatusMsg = "❌ AI 失败：" + (e && e.message ? e.message : e) + "（检查 Key / 网络 / 模型名）";
         if (hint) { hint.style.display = ""; hint.textContent = "⚠ " + (e && e.message ? e.message : e) + "（检查 Key / 网络 / 模型名）"; }
-        try { updateAITop(); } catch (e2) {}
+        try { updateAITop(); renderUshortCard(); } catch (e2) {}
       })
-      .then(function () { aiBusy = false; try { updateAITop(); } catch (e) {} });
+      .then(function () {
+        aiBusy = false; aiStartedAt = 0;
+        try { updateAITop(); renderUshortCard(); } catch (e) {}
+      });
   }
   function aiSnapNow() {
     var q = (parsed && parsed.quote) || {};
@@ -4530,7 +4561,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     }
     if (stt) stt.textContent = aiBusy ? "分析中…" : has ? (last || "已配置") : (collapsed ? "未配置 AI" : "普通模式");
     if (note) {
-      if (aiBusy) note.textContent = "🤖 AI 正在分析全部卡片，请稍候…";
+      if (aiBusy) note.textContent = "🤖 " + (aiStatusMsg || "AI 正在分析全部卡片，请稍候…");
       else if (has) {
         var extra = "";
         if (st.aiApiModel) extra += " · 上次模型 " + st.aiApiModel;
@@ -4796,6 +4827,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var h = '<div class="ushead"><span class="usbadge ' + cls + '">' + us.label + "</span>" +
       '<span class="usconf">' + (us.conf > 0 ? "置信 " + us.conf : "置信 --") + '</span><span class="sp"></span>' +
       '<span class="us_src">' + (hasAIKey() ? (us.aiAction ? "规则 + AI" : "规则 · AI 未确认") : "规则版（未配置 AI）") + "</span></div>";
+    if (aiBusy) h += '<div class="sigwhy" style="color:#7dd3fc">🤖 ' + escHtml(aiStatusMsg || "AI 分析中…") + "</div>";
+    else if (aiStatusMsg) h += '<div class="sigwhy">' + escHtml(aiStatusMsg) + "</div>";
     if (us.entryLo != null && (us.action === "buy" || us.action === "weak" || us.action === "sell")) {
       var _l1 = us.action === "sell" ? "卖出" : "买点";
       var _l2 = us.action === "sell" ? "回升失效" : "止损";
@@ -4812,7 +4845,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       '</button><button class="btn" id="usMuteBtn">静音 30 分钟</button></div>';
     box.innerHTML = h;
     var ab = $("usAiBtn");
-    if (ab) ab.addEventListener("click", function () { if (!hasAIKey()) openAIConfig(); else generateAIBrief(true); });
+    if (ab) ab.addEventListener("click", function () {
+      if (!hasAIKey()) { openAIConfig(); return; }
+      aiStatusMsg = aiBusy ? "AI 分析进行中…（请稍候）" : "正在启动 AI 分析…";
+      try { renderUshortCard(); } catch (e) {}
+      generateAIBrief(true);
+    });
     var mb = $("usMuteBtn");
     if (mb) mb.addEventListener("click", function () { try { muteUntil = Date.now() + 30 * 60 * 1000; } catch (e) {} });
   }
