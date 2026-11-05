@@ -1716,5 +1716,12 @@ ok("规则版可复制", html.includes("data-rule-copy") && html.includes("ruleS
 ok("无 Key 不自动调用 AI", html.includes("maybeSchedBriefs") && html.includes("if (!hasAIKey()) return"));
 ok("配置后切换 AI 深度版说明", html.includes("配置 Key 后自动切换为 AI 深度简报"));
 
+
+/* ---------- 73) 悬浮菜单：立即 AI 分析 ---------- */
+console.log("\n[悬浮菜单立即分析]");
+ok("悬浮菜单含「立即 AI 分析」", html.includes('id="fabGen"') && html.includes("立即 AI 分析"));
+ok("主操作高亮", html.includes("fabprimary") && html.includes("#aiFabMenu button.fabprimary"));
+ok("未配置时点击先展开配置", html.includes("if (!hasAIKey()) { openAIConfig(); return; }"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

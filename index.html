@@ -254,6 +254,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 #aiFabMenu button{border:1px solid var(--line);background:var(--card2);color:var(--txt);border-radius:8px;
   font-size:12px;padding:6px 9px;cursor:pointer;text-align:left}
 #aiFabMenu button:hover{border-color:var(--accent)}
+#aiFabMenu button.fabprimary{border-color:var(--accent);color:#bae6fd;font-weight:600;background:#0f2740}
 #aiTopCard.ok .ainote{color:#86efac}
 #aiTopCard.busy .ainote{color:#7dd3fc}
 @media(max-width:560px){
@@ -311,7 +312,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 <div id="aiFab" title="AI 分析（生成 / 配置）">🤖</div>
 <div id="aiFabMenu">
   <div class="fabtitle">AI 深度分析</div>
-  <button id="fabGen">生成 AI 分析</button>
+  <button id="fabGen" class="fabprimary">立即 AI 分析</button>
   <button id="fabCfg">配置 Key</button>
   <button id="fabTop">回到 AI 卡</button>
 </div>
@@ -3390,7 +3391,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.76 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.77 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -4545,7 +4546,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (fab === ev.target) return;
       closeMenu();
     });
-    var g = $("fabGen"); if (g) g.addEventListener("click", function () { closeMenu(); generateAIBrief(true); });
+    var g = $("fabGen");
+    if (g) g.addEventListener("click", function () {
+      closeMenu();
+      if (!hasAIKey()) { openAIConfig(); return; }
+      generateAIBrief(true);
+    });
     var c = $("fabCfg"); if (c) c.addEventListener("click", function () { closeMenu(); openAIConfig(); });
     var t = $("fabTop");
     if (t) t.addEventListener("click", function () {
