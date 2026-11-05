@@ -3407,7 +3407,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.82 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.83 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3613,6 +3613,17 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   var lastRuleCtx = null;
   var aiBusy = false;
   var aiStartedAt = 0, aiStatusMsg = "";
+  var closedRenderedKey = "";
+  /** 当前是否处于可做超短线分析的交易时段（A股/港股：开市或收市竞价） */
+  function isTradingNow() {
+    try {
+      var ph = C.marketPhase(new Date(), st.code);
+      return ph === "open" || ph === "cas";
+    } catch (e) { return false; }
+  }
+  function isMarketClosedNow() {
+    try { return C.marketPhase(new Date(), st.code) === "closed"; } catch (e) { return false; }
+  }
   /** 给网络请求加超时，避免按钮“永久卡在分析中” */
   function withTimeout(p, ms, label) {
     return Promise.race([p, new Promise(function (_, reject) {
@@ -4084,7 +4095,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   /** 实时跟踪触发判断：只在交易时段、有实质变化、且满足最短间隔时返回原因 */
   function aiRealtimeTrigger() {
     if (!metrics || metricsCode !== st.code) return "";
-    if (marketPhase(new Date(), st.code) !== "open") return "";
+    if (C.marketPhase(new Date(), st.code) !== "open") return "";
     var gap = st.aiMinGapMs || 90000;
     if (Date.now() - (st.aiAt || 0) < gap) return "";
     var prev = st.aiSnap || {};
@@ -4134,6 +4145,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   /** AI 结论 -> 弹窗提示（方向变化时） */
   function notifyAIAction(cards) {
     try {
+      if (!isTradingNow()) { st.lastAIAction = "info"; return; }   // 收盘后不弹交易提示
       var txt = [cards && cards.brief, cards && cards.pricePlan, cards && cards.signal, cards && cards.entry, cards && cards.wash]
         .filter(Boolean).join(" ");
       var level = "info", label = "观望/持有";
@@ -4158,7 +4170,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   }
   /** 实时跟踪主入口：交易时段内按事件触发；关闭实时时退回 15 分钟自动 */
   /* ---------- 定时深度简报（盘前 / 午间 / 盘后，工作日） ---------- */
-  var schedPending = {}, schedRenderedAt = 0;
+  var schedPending = {}, schedPendingAt = {}, schedRenderedAt = 0;
   function hhmmOf(ms) {
     var d = new Date(ms);
     var h = d.getHours(), m = d.getMinutes();
@@ -4167,19 +4179,19 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   function schedDefs() {
     var hk = C.marketOf(st.code) === "hk";
     if (hk) return [
-      { key: "preopen", label: "盘前简报", due: 9 * 60, until: 9 * 60 + 30, dueTxt: "09:00", untilTxt: "09:30",
+      { key: "preopen", label: "盘前简报", due: 9 * 60, until: 9 * 60 + 30, catchUntil: 23 * 60 + 59, dueTxt: "09:00", untilTxt: "09:30",
         hint: "交易日 09:00–09:30 自动生成：隔夜外盘/美股、昨日结构、公告、今开策略" },
-      { key: "midday", label: "午间简报", due: 12 * 60 + 5, until: 13 * 60, dueTxt: "12:05", untilTxt: "13:00",
+      { key: "midday", label: "午间简报", due: 12 * 60 + 5, until: 13 * 60, catchUntil: 23 * 60 + 59, dueTxt: "12:05", untilTxt: "13:00",
         hint: "交易日 12:05–13:00 自动生成：上午走势、午间公告、下午开盘策略" },
-      { key: "postclose", label: "盘后简报", due: 16 * 60 + 5, until: 17 * 60 + 30, dueTxt: "16:05", untilTxt: "17:30",
+      { key: "postclose", label: "盘后简报", due: 16 * 60 + 5, until: 17 * 60 + 30, catchUntil: 23 * 60 + 59, dueTxt: "16:05", untilTxt: "17:30",
         hint: "交易日 16:05–17:30 自动生成：今日总结 + 明日初步策略" }
     ];
     return [
-      { key: "preopen", label: "盘前简报", due: 9 * 60, until: 9 * 60 + 30, dueTxt: "09:00", untilTxt: "09:30",
+      { key: "preopen", label: "盘前简报", due: 9 * 60, until: 9 * 60 + 30, catchUntil: 23 * 60 + 59, dueTxt: "09:00", untilTxt: "09:30",
         hint: "交易日 09:00–09:30 自动生成：隔夜外盘/美股/A50、昨日结构、公告、今开策略" },
-      { key: "midday", label: "午间简报", due: 11 * 60 + 35, until: 13 * 60, dueTxt: "11:35", untilTxt: "13:00",
+      { key: "midday", label: "午间简报", due: 11 * 60 + 35, until: 13 * 60, catchUntil: 23 * 60 + 59, dueTxt: "11:35", untilTxt: "13:00",
         hint: "交易日 11:35–13:00 自动生成：上午走势、午间公告、下午开盘策略" },
-      { key: "postclose", label: "盘后简报", due: 15 * 60 + 5, until: 16 * 60 + 30, dueTxt: "15:05", untilTxt: "16:30",
+      { key: "postclose", label: "盘后简报", due: 15 * 60 + 5, until: 16 * 60 + 30, catchUntil: 23 * 60 + 59, dueTxt: "15:05", untilTxt: "16:30",
         hint: "交易日 15:05–16:30 自动生成：今日总结 + 明日初步策略" }
     ];
   }
@@ -4331,17 +4343,24 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       throw e;
     });
   }
-  function generateSchedBrief(phase, manual) {
+  function generateSchedBrief(phase, manual, catchup) {
     if (schedPending[phase]) return;
     if (!hasAIKey()) { try { updateAITop(); } catch (e) {} return; }
     if (!metrics || metricsCode !== st.code) return;
-    schedPending[phase] = true;
+    schedPending[phase] = true; schedPendingAt[phase] = Date.now();
     try { renderSchedCard(); } catch (e) {}
+    setTimeout(function () {
+      if (schedPending[phase] && Date.now() - (schedPendingAt[phase] || 0) > 90000) {
+        schedPending[phase] = false; schedPendingAt[phase] = 0;
+        try { var _ez = schedEntry(); if (!_ez[phase]) _ez[phase] = { error: "生成超时（已自动恢复，可手动重试）" }; save({ aiSched: st.aiSched }); } catch (e) {}
+        try { renderSchedCard(); } catch (e) {}
+      }
+    }, 95000);
     var jobs = [];
-    jobs.push(fetchSectorCtx(st.code).catch(function () { return null; }));
-    jobs.push(fetchMarketCtx().catch(function () { return []; }));
-    jobs.push(phase === "preopen" ? fetchOvernightCtx() : Promise.resolve(null));
-    jobs.push(fetchAnnouncementsCtx(st.code));
+    jobs.push(withTimeout(fetchSectorCtx(st.code).catch(function () { return null; }), 15000, "板块数据").catch(function () { return null; }));
+    jobs.push(withTimeout(fetchMarketCtx().catch(function () { return []; }), 15000, "大盘数据").catch(function () { return []; }));
+    jobs.push(phase === "preopen" ? withTimeout(fetchOvernightCtx(), 15000, "外盘数据").catch(function () { return null; }) : Promise.resolve(null));
+    jobs.push(withTimeout(fetchAnnouncementsCtx(st.code), 15000, "公告数据").catch(function () { return null; }));
     Promise.all(jobs).then(function (arr) {
       var extras = { sector: arr[0], market: arr[1], overnight: arr[2], announcements: arr[3] };
       var ctx = buildSchedContext(phase, extras);
@@ -4349,14 +4368,14 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     }).then(function (out) {
       var ent = schedEntry();
       ent[phase] = { at: Date.now(), text: out.res.text, model: out.res.model, apiModel: out.res.apiModel,
-        manual: !!manual, dataLine: (out.ctx && out.ctx.dataLine) || "", gaps: (out.ctx && out.ctx.dataGaps) || [] };
+        manual: !!manual, catchup: !!catchup, dataLine: (out.ctx && out.ctx.dataLine) || "", gaps: (out.ctx && out.ctx.dataGaps) || [] };
       try { bumpAIStats(out.res.usage, out.res.apiModel || out.res.model); } catch (e) {}
       try { save({ aiSched: st.aiSched }); } catch (e) {}
-      schedPending[phase] = false;
+      schedPending[phase] = false; schedPendingAt[phase] = 0;
       try { renderSchedCard(); } catch (e) {}
       try { updateAITop(); } catch (e) {}
     }).catch(function (e) {
-      schedPending[phase] = false;
+      schedPending[phase] = false; schedPendingAt[phase] = 0;
       var ent = schedEntry();
       ent[phase] = { at: Date.now(), error: String(e && e.message ? e.message : e), manual: !!manual };
       try { save({ aiSched: st.aiSched }); } catch (e2) {}
@@ -4374,10 +4393,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var defs = schedDefs();
     for (var i = 0; i < defs.length; i++) {
       var d = defs[i];
-      if (mins < d.due || mins > d.until) continue;
       if (sameDay && ent[d.key]) continue;
-      if (schedPending[d.key]) continue;
-      generateSchedBrief(d.key, false);
+      if (schedPending[d.key]) {
+        if (Date.now() - (schedPendingAt[d.key] || 0) > 90000) schedPending[d.key] = false;
+        else continue;
+      }
+      var inWin = mins >= d.due && mins <= d.until;
+      var canCatch = mins > d.until && mins <= (d.catchUntil || d.until);
+      if (!inWin && !canCatch) continue;
+      generateSchedBrief(d.key, false, canCatch);
       return;
     }
   }
@@ -4468,6 +4492,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       hintEl.textContent = hasAI
         ? ("自动窗口（工作日）：" + defs[0].dueTxt + " / " + defs[1].dueTxt + " / " + defs[2].dueTxt + " · 页面打开时自动，每期 1 次 AI 调用")
         : "未配置 AI：以下为规则版（按当前行情实时生成，不产生费用）；配置 Key 后自动切换为 AI 深度简报";
+      if (hasAI) hintEl.textContent += "；错过自动窗口后，当天再次打开会自动补生成（每期 1 次调用）";
     }
     if (meta) meta.textContent = hasAI ? (sameDay && done > 0 ? done + "/3" : "未生成") : "规则版";
     defs.forEach(function (d) {
@@ -4484,10 +4509,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       var stTxt;
       if (schedPending[d.key]) stTxt = "生成中…";
       else if (rec && rec.error) stTxt = "生成失败：" + rec.error;
-      else if (rec) { done++; stTxt = "已生成 " + hhmmOf(rec.at) + (rec.manual ? "（手动）" : "（自动）"); }
+      else if (rec) { done++; stTxt = "已生成 " + hhmmOf(rec.at) + (rec.manual ? "（手动）" : rec.catchup ? "（补生成）" : "（自动）"); }
       else if (!weekday) stTxt = "周末不自动生成";
       else if (mins < d.due) stTxt = "未到时间（" + d.dueTxt + " 自动）";
       else if (mins <= d.until) stTxt = "等待自动生成（窗口至 " + d.untilTxt + "）";
+      else if (mins <= (d.catchUntil || d.until)) stTxt = "等待自动补生成…（曾错过 " + d.dueTxt + " 窗口）";
       else stTxt = "已错过自动窗口，可手动生成";
       html += '<div class="schedblk"><div class="schedhead"><b>' + d.label + '</b><span>' + stTxt + "</span><span class=\"sp\"></span>";
       html += '<button class="schedbtn" data-phase="' + d.key + '">' + (rec ? "重新生成" : "立即生成") + "</button>";
@@ -4527,6 +4553,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 
   function maybeAIRealtime() {
     if (!hasAIKey()) return;
+    if (!isTradingNow()) return;   // 收盘后不自动分析
     if (st.aiRealtime !== true) { maybeAIBrief(); return; }   // 默认 15 分钟自动；勾选「实时跟踪」才事件触发
     if (aiBusy) return;
     if (typeof document !== "undefined" && document.hidden) return;   // 页面不可见时不实时调用，省费用
@@ -4539,6 +4566,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   }
   function maybeAIBrief() {
     if (st.aiAuto === false) return;
+    if (!isTradingNow()) return;   // 收盘后不再自动调用 AI，避免不必要费用
     if (!st.aiKey) return;
     if (!metrics || metricsCode !== st.code) return;
     if (st.aiCode !== st.code || !st.aiAt || Date.now() - st.aiAt >= 15 * 60 * 1000) generateAIBrief(false);
@@ -4894,11 +4922,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var us = ushortSignal();
     lastUshort = us;
     if (!us) { box.innerHTML = '<div class="sigwhy">等待行情…</div>'; return; }
-    if (meta) meta.textContent = "T+1 · " + (us.source.length ? us.source.join("+") : "规则") + " · " + hhmmOf(us.at);
+    var _closedCard = isMarketClosedNow();
+    if (meta) meta.textContent = _closedCard ? "已收盘 · 盘中信号暂停" : ("T+1 · " + (us.source.length ? us.source.join("+") : "规则") + " · " + hhmmOf(us.at));
     var cls = us.action === "buy" ? "buy" : us.action === "sell" ? "sell" : us.action === "hold" ? "hold" : us.action === "weak" ? "weak" : "wait";
     var h = '<div class="ushead"><span class="usbadge ' + cls + '">' + us.label + "</span>" +
       '<span class="usconf">' + (us.conf > 0 ? "置信 " + us.conf : "置信 --") + '</span><span class="sp"></span>' +
       '<span class="us_src">' + (hasAIKey() ? (us.aiAction ? "规则 + AI" : "规则 · AI 未确认") : "规则版（未配置 AI）") + "</span></div>";
+    if (_closedCard) h += '<div class="sigwhy">已收盘：盘中信号与 AI 自动分析已暂停（节省费用）；买/卖弹窗不再提示。盘后请查看「盘后简报」。</div>';
     if (aiBusy) h += '<div class="sigwhy" style="color:#7dd3fc">🤖 ' + escHtml(aiStatusMsg || "AI 分析中…") + "</div>";
     else if (aiStatusMsg) h += '<div class="sigwhy">' + escHtml(aiStatusMsg) + "</div>";
     if (us.action === "buy" || us.action === "weak") {
@@ -4935,6 +4965,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     try {
       var us = lastUshort || ushortSignal();
       if (!us) return;
+      if (!isTradingNow()) { lastUshortAlertKey = ""; return; }   // 收盘后不再弹交易提示
       if (us.action !== "buy" && us.action !== "sell") { lastUshortAlertKey = ""; return; }
       if (us.conf < 60) return;
       var id = "ushort:" + st.code + ":" + us.action + ":" + (us.entryLo != null ? us.entryLo.toFixed(2) : "x") + ":" + (us.stop != null ? us.stop.toFixed(2) : "x");
@@ -6789,15 +6820,22 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           fetchOrderBook(st.code).then(function (ob) { if (ob) orderData = ob; }).catch(function () {});
         }
         render(metrics, p.points);
-        try { renderSignalCard(); } catch (e) { /* 指标不足时不阻塞行情 */ }
-        try { renderBurstCard(); } catch (e) { /* 敏捷信号失败不阻塞 */ }
-        try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
-        try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
-        try { if (st.anaCode !== st.code || !st.anaAt || Date.now() - st.anaAt >= 15 * 60 * 1000) renderAnalysisCard(); } catch (e) { /* 简报失败不阻塞 */ }
+        // 收盘后：盘中卡片只渲染一次作为收盘快照，之后冻结（不再刷新、不再自动调用 AI）
+        var _closedNow = isMarketClosedNow();
+        var _frozenKey = st.code + ":" + todayKey();
+        var _freezeIntraday = _closedNow && closedRenderedKey === _frozenKey;
+        if (!_freezeIntraday) {
+          try { renderSignalCard(); } catch (e) { /* 指标不足时不阻塞行情 */ }
+          try { renderBurstCard(); } catch (e) { /* 敏捷信号失败不阻塞 */ }
+          try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
+          try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
+          try { if (st.anaCode !== st.code || !st.anaAt || Date.now() - st.anaAt >= 15 * 60 * 1000) renderAnalysisCard(); } catch (e) { /* 简报失败不阻塞 */ }
+          try { paintAINotes(); } catch (e) { /* AI 解读失败不阻塞 */ }
+          if (_closedNow) closedRenderedKey = _frozenKey;
+        }
         try { maybeAIRealtime(); } catch (e) { /* AI 失败不阻塞 */ }
         try { maybeSchedBriefs(); } catch (e) { /* 定时简报失败不阻塞 */ }
         try { renderSchedCard(); } catch (e) {}
-        try { paintAINotes(); } catch (e) { /* AI 解读失败不阻塞 */ }
         try {
           lastUnified = unifiedSignal();
           updateUnifiedNote(lastUnified);
@@ -6937,7 +6975,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     save({ code: st.code, watch: st.watch });
     parsed = null; metrics = null; metricsCode = ""; lastActive = {}; alertQueue = []; renderAlert();
     try { paintCardPrices(); } catch (e) {}
-    try { st.aiCode = ""; st.aiUltra = null; lastUshort = null; lastUshortAlertKey = ""; var _ao = $("aiOut"); if (_ao) _ao.textContent = ""; } catch (e) {}
+    try { st.aiCode = ""; st.aiUltra = null; lastUshort = null; lastUshortAlertKey = ""; closedRenderedKey = ""; var _ao = $("aiOut"); if (_ao) _ao.textContent = ""; } catch (e) {}
     try { renderBurstCard(); } catch (e) {}
     $("codeInput").value = C.displayCode(code);
     renderChips(); renderPlanSummary(); bindPosInputs();

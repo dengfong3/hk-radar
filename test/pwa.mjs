@@ -1775,5 +1775,17 @@ ok("卖出弹窗包含明日计划", html.includes("超短线卖出信号（T+1�
 ok("空仓也展示建仓后卖出计划", html.includes("（空仓）建仓后生效"));
 ok("AI 持仓必须给卖点", html.includes("若输入有持仓") && html.includes("必须给出今日卖出条件"));
 
+
+/* ---------- 79) 收盘后停止盘中 AI + 定时简报补生成 ---------- */
+console.log("\n[收盘后与定时补生成]");
+ok("交易时段判定", html.includes("function isTradingNow") && html.includes("function isMarketClosedNow"));
+ok("收盘后不再自动调用 AI", html.includes("if (!isTradingNow()) return;   // 收盘后不再自动调用 AI") && html.includes("// 收盘后不自动分析"));
+ok("收盘后不弹交易提示", html.includes("收盘后不弹交易提示"));
+ok("收盘后冻结盘中卡片", html.includes("closedRenderedKey") && html.includes("_freezeIntraday") && html.includes("收盘快照"));
+ok("超短线卡显示收盘暂停提示", html.includes("已收盘：盘中信号与 AI 自动分析已暂停"));
+ok("定时简报可当天补生成", html.includes("catchUntil") && html.includes("等待自动补生成") && html.includes("（补生成）"));
+ok("定时简报超时与看护", html.includes("schedPendingAt") && html.includes("生成超时（已自动恢复") && html.includes("withTimeout(fetchSectorCtx"));
+ok("补生成说明", html.includes("错过自动窗口后，当天再次打开会自动补生成"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
