@@ -1764,5 +1764,16 @@ ok("AI 买入弹窗须服从统一结论", html.includes("if (level === \"buy\")
 ok("“不建议建仓”不会被误判为买入", html.includes("不建议|不宜|不可|避免|别追|不要买"));
 ok("AI 正文买入措辞受约束", html.includes("正文里不要出现“建议买入/可以建仓/小仓试”"));
 
+
+/* ---------- 78) 超短线卖出信号（持仓） ---------- */
+console.log("\n[超短线卖出]");
+ok("持仓时计算止盈/止损/均价", html.includes("out.sellStop") && html.includes("out.sellTake") && html.includes("out.holding"));
+ok("持仓卖出触发条件", html.includes("跌破止损") && html.includes("到止盈/减仓档") && html.includes("跌破均价") && html.includes("盘中出现卖点/风控信号"));
+ok("未触发卖点时显示持有", html.includes("持有（设好卖点）") && html.includes("持仓中，未触发卖点"));
+ok("卡片显示卖出计划价位", html.includes("止盈/减仓") && html.includes("均价 <b>") && html.includes("持仓 <b>"));
+ok("卖出弹窗包含明日计划", html.includes("超短线卖出信号（T+1）") && html.includes("明日卖出计划："));
+ok("空仓也展示建仓后卖出计划", html.includes("（空仓）建仓后生效"));
+ok("AI 持仓必须给卖点", html.includes("若输入有持仓") && html.includes("必须给出今日卖出条件"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -287,6 +287,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 #usBox .usbadge{font-size:14px;font-weight:700;padding:2px 10px;border-radius:8px;border:1px solid var(--line)}
 #usBox .usbadge.buy{color:#fecaca;border-color:#b91c1c;background:#3b0d0d}
 #usBox .usbadge.sell{color:#bae6fd;border-color:#0369a1;background:#0b2540}
+#usBox .usbadge.hold{color:#bae6fd;border-color:#0ea5e9;background:#082f49}
 #usBox .usbadge.weak{color:#fde68a;border-color:#a16207;background:#2a1f0a}
 #usBox .usbadge.wait{color:#cbd5e1;border-color:var(--line);background:var(--card2)}
 #usBox .usconf{font-size:11px;color:var(--dim)}
@@ -3406,7 +3407,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.81 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.82 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3742,6 +3743,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       "必须结合三层：①个股结构与量价 ②所属板块强弱 ③大盘环境，引用具体数字与价位，并指出矛盾点（例如个股强于板块但大盘弱）。\n" +
       "信号口径：以输入里的 unified 为最终结论（action / buy / reasons / conflicts）。若 unified.buy 为 false，禁止给出买入建议；若各卡片信号冲突，要明确指出并按 unified 收敛，不得各说各话。\n" +
       "交易风格：本系统用于超短线 T+1（今天买、明天卖）。ultraShort 必须给可执行的当日买卖点、止损、目标与次日卖出计划；14:45 后不建议买入；规则统一结论为“不交易/观望”时 ultraShort.action 必须为 wait；宁可 wait 也不要勉强给买点。\n" +
+      "若输入有持仓（position.shares>0），必须给出今日卖出条件：止盈/减仓价、止损价、跌破均价如何处理；满足任一条件时 action=sell，并把条件写进 nextDayPlan/reason；未触发时 action=wait 也要在 nextDayPlan 写明卖点。\n" +
       "一致性硬规则：unified.buy 为 false 时，entry 字段必须写“不建议建仓”，pricePlan 不得给买入建议，ultraShort.action 必须 wait；任何卡片之间不得出现“一边说买、一边说不交易”，若发现数据间矛盾，以 unified 为准并在理由中说明。\n" +
       "买入措辞规范：本条数据中若 unified.buy=false，正文里不要出现“建议买入/可以建仓/小仓试”等正向买入措辞，只能写“观察/等待/不建议”；否则系统弹窗会误判。\n" +
       "只输出一个 JSON 对象（不要 markdown 代码块、不要多余文字），键如下，每个值是 60~140 字中文：\n" +
@@ -4783,6 +4785,30 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         if (sp.target != null) out.target = sp.target;
         if (sp.rr != null) out.rr = sp.rr;
       }
+      // ---- 持仓卖出计划（超短线 T+1 必须给出卖点） ----
+      var holding = !!(pos && pos.shares > 0);
+      var plan = (typeof curPlan === "function" ? curPlan() : null) || null;
+      var sellStop = null, sellTake = null;
+      try {
+        if (plan && plan.reds && plan.reds.length) sellStop = plan.reds[0].at;
+        if (plan && plan.takes && plan.takes.length) sellTake = plan.takes[0].lo;
+      } catch (e) {}
+      if (sellStop == null && holding && pos.cost > 0) sellStop = Math.round(pos.cost * 0.97 * 100) / 100;
+      if (sellStop == null && sp && sp.stop != null) sellStop = sp.stop;
+      if (sellTake == null) {
+        try {
+          var _rr = lastRuleCtx && lastRuleCtx.refs;
+          if (_rr && _rr.reduce && _rr.reduce.length) sellTake = _rr.reduce[0].price;
+        } catch (e) {}
+      }
+      if (sellTake == null && sp && sp.target != null) sellTake = sp.target;
+      out.holding = holding;
+      out.posShares = holding ? pos.shares : 0;
+      out.posCost = holding ? pos.cost : 0;
+      out.posPnlPct = (holding && pos.cost > 0) ? (metrics.price / pos.cost - 1) * 100 : null;
+      out.sellStop = sellStop;
+      out.sellTake = sellTake;
+      out.vwap = metrics ? metrics.vwap : null;
       var _ea = (typeof lastEntryAdvice !== "undefined" && lastEntryAdvice) ? lastEntryAdvice : null;
       if (u.buy) {
         if (!hasAIKey() || !ai) { out.action = "buy"; out.conf = u.score || 60; out.source = ["规则"]; out.reasons = ["规则买点（无 AI 确认）"]; }
@@ -4811,6 +4837,36 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         out.action = "wait"; out.reasons = (u.reasons && u.reasons.length) ? u.reasons.slice(0, 2) : [u.action || "观望"];
       }
       if (u.buy && ai && ai.action === "sell") out.conflicts.push("规则买点 vs AI 卖点：以保守为先，暂不买入");
+      // ---- 持仓：触发止盈/止损/破均价/异动卖点 → 卖出提示；否则持有并给出明日卖出计划 ----
+      if (holding) {
+        var _p = metrics ? metrics.price : null;
+        var _vx = metrics ? metrics.volRatio : null;
+        var _burstSell = false;
+        try {
+          var _logs = st.burstLog || [];
+          var _lb = _logs.length ? _logs[_logs.length - 1] : null;
+          if (_lb && _lb.code === st.code && _lb.side === "sell") _burstSell = true;
+        } catch (e) {}
+        var _sr = [];
+        if (sellStop != null && _p != null && _p <= sellStop) _sr.push("跌破止损 " + fmtP(sellStop));
+        if (sellTake != null && _p != null && _p >= sellTake) _sr.push("到止盈/减仓档 " + fmtP(sellTake));
+        if (metrics && _p != null && metrics.vwap != null && _p < metrics.vwap * 0.995 && (_vx == null || _vx >= 1.5)) _sr.push("跌破均价 " + fmtP(metrics.vwap) + " 且量能放大");
+        if (_burstSell) _sr.push("盘中出现卖点/风控信号");
+        if (ai && ai.action === "sell") _sr.push("AI 建议卖出：" + (ai.reason || ""));
+        if (u.sell && _sr.length === 0) _sr.push((u.reasons && u.reasons[0]) || "统一信号转空");
+        if (_sr.length) {
+          out.action = "sell"; out.conf = 75; out.sellTrigger = _sr[0];
+          out.source = out.source.concat(["持仓"]);
+          out.reasons = _sr.slice(0, 3);
+        } else if (out.action !== "sell") {
+          out.action = "hold"; out.conf = Math.round(u.score || 50);
+          out.reasons = ["持仓中，未触发卖点（止盈 " + fmtP(sellTake) + " / 止损 " + fmtP(sellStop) + "）"];
+        }
+        out.nextDayPlan = "明日卖出：冲高至 " + (sellTake != null ? fmtP(sellTake) : "目标位") + " 减/止盈；跌破 " +
+          (sellStop != null ? fmtP(sellStop) : "止损") + " 离场；跌破均价 " + fmtP(metrics ? metrics.vwap : null) + " 且放量则减仓";
+      } else if (!out.nextDayPlan) {
+        out.nextDayPlan = "（空仓）建仓后生效：次日高开冲高不破均价可持有；平开看量能；低开跌破止损离场";
+      }
       // 若规则/建仓建议给出可执行区间而 sp 没有，则用建仓建议区间补齐
       if (!out.entryLo && _ea && _ea.ok && !_ea.hasPosition && _ea.zones && _ea.zones.length) {
         out.entryLo = _ea.zones[0].lo; out.entryHi = _ea.zones[0].hi;
@@ -4825,6 +4881,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       }
       if (out.action === "buy" && out.conf < 60) out.action = "weak";
       out.label = out.action === "buy" ? "超短线买入信号" : out.action === "sell" ? "超短线卖出/减仓"
+        : out.action === "hold" ? "持有（设好卖点）"
         : out.action === "weak" ? "买点待确认" : ((u && u.action === "不交易") ? "不交易" : "观望");
       out.at = Date.now();
       return out;
@@ -4838,20 +4895,24 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     lastUshort = us;
     if (!us) { box.innerHTML = '<div class="sigwhy">等待行情…</div>'; return; }
     if (meta) meta.textContent = "T+1 · " + (us.source.length ? us.source.join("+") : "规则") + " · " + hhmmOf(us.at);
-    var cls = us.action === "buy" ? "buy" : us.action === "sell" ? "sell" : us.action === "weak" ? "weak" : "wait";
+    var cls = us.action === "buy" ? "buy" : us.action === "sell" ? "sell" : us.action === "hold" ? "hold" : us.action === "weak" ? "weak" : "wait";
     var h = '<div class="ushead"><span class="usbadge ' + cls + '">' + us.label + "</span>" +
       '<span class="usconf">' + (us.conf > 0 ? "置信 " + us.conf : "置信 --") + '</span><span class="sp"></span>' +
       '<span class="us_src">' + (hasAIKey() ? (us.aiAction ? "规则 + AI" : "规则 · AI 未确认") : "规则版（未配置 AI）") + "</span></div>";
     if (aiBusy) h += '<div class="sigwhy" style="color:#7dd3fc">🤖 ' + escHtml(aiStatusMsg || "AI 分析中…") + "</div>";
     else if (aiStatusMsg) h += '<div class="sigwhy">' + escHtml(aiStatusMsg) + "</div>";
-    if (us.entryLo != null && (us.action === "buy" || us.action === "weak" || us.action === "sell")) {
-      var _l1 = us.action === "sell" ? "卖出" : "买点";
-      var _l2 = us.action === "sell" ? "回升失效" : "止损";
-      h += '<div class="usline">' + _l1 + ' <b>' + fmtP(us.entryLo) + (us.entryHi != null ? "–" + fmtP(us.entryHi) : "") + "</b>" +
-        "<span>" + _l2 + " <b>" + fmtP(us.stop) + "</b></span><span>目标 <b>" + fmtP(us.target) + "</b></span>" +
+    if (us.action === "buy" || us.action === "weak") {
+      h += '<div class="usline">买点 <b>' + fmtP(us.entryLo) + (us.entryHi != null ? "–" + fmtP(us.entryHi) : "") + "</b>" +
+        "<span>止损 <b>" + fmtP(us.stop) + "</b></span><span>目标 <b>" + fmtP(us.target) + "</b></span>" +
         "<span>RR <b>" + (us.rr == null ? "--" : us.rr) + "</b></span></div>";
-    } else if (us.action !== "sell") {
-      h += '<div class="sigwhy">当前不交易/观望：不给出执行价位，等统一信号转为可买/可卖再提示。</div>';
+    } else if (us.action === "sell" || us.action === "hold") {
+      h += '<div class="usline"><span>止盈/减仓 <b>' + fmtP(us.sellTake) + "</b></span>" +
+        "<span>止损 <b>" + fmtP(us.sellStop) + "</b></span><span>均价 <b>" + fmtP(us.vwap) + "</b></span>" +
+        (us.posShares ? "<span>持仓 <b>" + us.posShares + " 股</b></span>" : "") + "</div>";
+      if (us.posPnlPct != null) h += '<div class="sigwhy">持仓成本 ' + fmtP(us.posCost) + " · 浮盈 " + pctTxt(us.posPnlPct) + "</div>";
+    } else {
+      h += '<div class="sigwhy">当前不交易/观望：不给出买入执行价位；' +
+        (us.holding ? "持仓按下方卖出计划处理。" : "等统一信号转为可买/可卖再提示。") + "</div>";
     }
     h += '<div class="sigwhy"><b>明日卖出计划：</b>' + escHtml(us.nextDayPlan) + "</div>";
     if (us.reasons && us.reasons.length) h += '<div class="sigwhy">依据：' + escHtml(us.reasons.join(" · ")) + "</div>";
@@ -4886,7 +4947,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           "（已统一：智能信号 / 盘中异动 / 建仓建议 / AI 结论；非预测，T+1）";
       } else {
         txt = "⚡ 超短线卖出信号（T+1）：" + (us.reasons[0] || "统一信号转空") +
-          " · 减仓/离场后次日再评估（规则+AI 统一信号，非预测）";
+          " · 止盈 " + fmtP(us.sellTake) + " / 止损 " + fmtP(us.sellStop) + " / 均价 " + fmtP(us.vwap) +
+          " · 明日卖出计划：" + us.nextDayPlan + "（已统一：规则+AI+持仓，非预测）";
       }
       alertOnce(id, us.action === "buy" ? "buy" : "sell", txt, metrics ? metrics.price : null, 10 * 60 * 1000);
     } catch (e) { /* 弹窗失败不影响 */ }
