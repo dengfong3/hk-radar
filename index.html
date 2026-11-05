@@ -283,6 +283,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     <button class="btn" id="aiTest">测试连接</button>
     <button class="btn" id="aiClearKey">清除</button>
     <label class="ailbl"><input type="checkbox" id="aiAuto" checked>自动15分钟</label>
+    <label class="ailbl"><input type="checkbox" id="aiRealtime" checked>实时跟踪</label>
   </div>
   <div class="ainote" id="aiTopNote">未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。</div>
   <div class="aistats" id="aiStats" style="display:none"></div>
@@ -3363,7 +3364,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.69 · 2026-11-04";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.70 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3967,8 +3968,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         var mm = ts.getMinutes() < 10 ? "0" + ts.getMinutes() : ts.getMinutes();
         if (status) status.textContent = "AI 完成（全部卡片）" + hh + ":" + mm + " · " + res.model;
         if (hint) { hint.style.display = ""; hint.textContent = "AI 已把解读写入各卡片（绿色块）；仅作参考，不构成投资建议。"; }
+        st.aiTriggerAt = Date.now();
+        try { st.aiSnap = aiSnapNow(); } catch (e) {}
+        try { notifyAIAction(res.cards); } catch (e) {}
         try { rerenderForAINotes(); } catch (e) {}
         try { updateAITop(); } catch (e) {}
+        try { save({ aiTriggerAt: st.aiTriggerAt, aiSnap: st.aiSnap, lastAIAction: st.lastAIAction }); } catch (e) {}
       })
       .catch(function (e) {
         if (status) status.textContent = "AI 失败";
@@ -3976,6 +3981,105 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { updateAITop(); } catch (e2) {}
       })
       .then(function () { aiBusy = false; try { updateAITop(); } catch (e) {} });
+  }
+  function aiSnapNow() {
+    var q = (parsed && parsed.quote) || {};
+    var sp = lastSetup || {}, w = lastWash || {};
+    var logs = st.burstLog || [];
+    var lastBurst = logs.length ? logs[logs.length - 1] : null;
+    return {
+      at: Date.now(),
+      price: metrics ? metrics.price : null,
+      vwapDevPct: metrics ? metrics.vwapDevPct : null,
+      volRatio: metrics ? metrics.volRatio : null,
+      score: sp.score, grade: sp.grade, side: sp.side,
+      wash: w.wash, washVerdict: w.verdict,
+      idxPct: indexData ? indexData.pct : null,
+      high: q.high, low: q.low,
+      burstKey: lastBurst ? (lastBurst.code + ":" + lastBurst.kind + ":" + lastBurst.hhmm) : ""
+    };
+  }
+  /** 实时跟踪触发判断：只在交易时段、有实质变化、且满足最短间隔时返回原因 */
+  function aiRealtimeTrigger() {
+    if (!metrics || metricsCode !== st.code) return "";
+    if (marketPhase(new Date(), st.code) !== "open") return "";
+    var gap = st.aiMinGapMs || 90000;
+    if (Date.now() - (st.aiAt || 0) < gap) return "";
+    var prev = st.aiSnap || {};
+    var reasons = [];
+    var price = metrics.price;
+    if (prev.price && price) {
+      var move = Math.abs(price - prev.price) / prev.price * 100;
+      if (move >= 0.4) reasons.push("价格波动 " + move.toFixed(2) + "%");
+    }
+    if (prev.vwapDevPct != null && metrics.vwapDevPct != null) {
+      if (prev.vwapDevPct * metrics.vwapDevPct < 0 && Math.abs(metrics.vwapDevPct) >= 0.2) reasons.push("穿越当日均价");
+      else if (Math.abs(metrics.vwapDevPct - prev.vwapDevPct) >= 0.8) reasons.push("偏离均价变化");
+    }
+    if (metrics.volRatio != null && metrics.volRatio >= 2.2 && !(prev.volRatio >= 2.2)) reasons.push("分钟量能放大 " + metrics.volRatio.toFixed(1) + "×");
+    var q = (parsed && parsed.quote) || {};
+    if (price != null && q.high > 0 && price >= q.high - Math.max(0.001, q.high * 0.0005) && prev.high !== q.high) reasons.push("触及日内新高");
+    if (price != null && q.low > 0 && price <= q.low + Math.max(0.001, q.low * 0.0005) && prev.low !== q.low) reasons.push("触及日内新低");
+    var sp = lastSetup;
+    if (sp && (sp.score !== prev.score || sp.grade !== prev.grade || sp.side !== prev.side)) {
+      reasons.push("信号变化 " + sp.grade + "/" + (sp.side || "none"));
+    }
+    if (lastWash && lastWash.ok && (lastWash.verdict !== prev.washVerdict || lastWash.wash !== prev.wash)) {
+      reasons.push("洗盘/出货变化");
+    }
+    try {
+      var pl = (lastRuleCtx && lastRuleCtx.plan) || null;
+      if (pl && price) {
+        var lv = [];
+        (pl.takes || []).forEach(function (t) { if (t && t.lo) lv.push({ v: t.lo, n: "减仓档" }); });
+        (pl.reds || []).forEach(function (r) { if (r && r.at) lv.push({ v: r.at, n: "止损位" }); });
+        (pl.buys || []).forEach(function (b) { if (b && b.hi) lv.push({ v: b.hi, n: "加仓档" }); });
+        for (var i = 0; i < lv.length; i++) {
+          if (Math.abs(price - lv[i].v) / lv[i].v <= 0.003) { reasons.push("接近" + lv[i].n + " " + lv[i].v.toFixed(2)); break; }
+        }
+      }
+    } catch (e) {}
+    if (indexData && indexData.pct != null && prev.idxPct != null && Math.abs(indexData.pct - prev.idxPct) >= 0.3) reasons.push("大盘波动");
+    var logs = st.burstLog || [];
+    var lastBurst = logs.length ? logs[logs.length - 1] : null;
+    if (lastBurst) {
+      var bk = lastBurst.code + ":" + lastBurst.kind + ":" + lastBurst.hhmm;
+      if (bk !== prev.burstKey) reasons.push("盘中异动 " + lastBurst.kind);
+    }
+    if (!reasons.length) return "";
+    return reasons.slice(0, 2).join("、");
+  }
+  /** AI 结论 -> 弹窗提示（方向变化时） */
+  function notifyAIAction(cards) {
+    try {
+      var txt = [cards && cards.brief, cards && cards.pricePlan, cards && cards.signal, cards && cards.entry, cards && cards.wash]
+        .filter(Boolean).join(" ");
+      var level = "info", label = "观望/持有";
+      if (/清仓|全部卖出|止损离场|离场/.test(txt)) { level = "danger"; label = "清仓/止损"; }
+      else if (/减仓|止盈|卖出/.test(txt)) { level = "sell"; label = "减仓/止盈"; }
+      else if (/建仓|买入|加仓|进场/.test(txt)) { level = "buy"; label = "买入/建仓"; }
+      var reason = st.aiTriggerReason || "AI 分析";
+      if (level !== "info" && st.lastAIAction !== level) {
+        var brief = String((cards && cards.brief) || (cards && cards.pricePlan) || "").replace(/\s+/g, " ");
+        alertOnce("ai:" + st.code + ":" + level, level,
+          "🤖 AI 实时提示（" + reason + "）：" + label + " —— " + brief.slice(0, 140) + "…（详见各卡片 AI 解读）",
+          metrics ? metrics.price : null, 10 * 60 * 1000);
+      }
+      st.lastAIAction = level;
+    } catch (e) { /* 弹窗失败不影响 */ }
+  }
+  /** 实时跟踪主入口：交易时段内按事件触发；关闭实时时退回 15 分钟自动 */
+  function maybeAIRealtime() {
+    if (!hasAIKey()) return;
+    if (st.aiRealtime === false) { maybeAIBrief(); return; }
+    if (aiBusy) return;
+    if (typeof document !== "undefined" && document.hidden) return;   // 页面不可见时不实时调用，省费用
+    if (!metrics || metricsCode !== st.code) return;
+    var reason = aiRealtimeTrigger();
+    if (!reason) return;
+    st.aiTriggerReason = reason;
+    try { updateAITop(); } catch (e) {}
+    generateAIBrief(false);
   }
   function maybeAIBrief() {
     if (st.aiAuto === false) return;
@@ -4008,8 +4112,20 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         if (st.aiApiModel) extra += " · 上次模型 " + st.aiApiModel;
         if (st.aiUsage && st.aiUsage.total_tokens != null) extra += " · tokens " + st.aiUsage.total_tokens;
         else if (st.aiUsage && st.aiUsage.prompt_tokens != null) extra += " · tokens " + ((st.aiUsage.prompt_tokens || 0) + (st.aiUsage.completion_tokens || 0));
-        note.textContent = "已配置 Key（" + maskKey(String(st.aiKey)) + "）" + extra +
-          "；点「生成 AI 分析」或自动每 15 分钟。若后台无记录，请核对后台 API Key 是否与此 Key 一致。";
+        var rtTxt;
+        if (st.aiRealtime !== false) {
+          var gapS = Math.round((st.aiMinGapMs || 90000) / 1000);
+          var trig = "";
+          if (st.aiTriggerReason) {
+            var ta = new Date(st.aiTriggerAt || Date.now());
+            trig = " · 上次触发：" + st.aiTriggerReason + " " + (ta.getHours() < 10 ? "0" : "") + ta.getHours() + ":" + (ta.getMinutes() < 10 ? "0" : "") + ta.getMinutes();
+          }
+          rtTxt = "实时跟踪中：价格波动≥0.4%、量能≥2.2×、信号/洗盘变化、接近买卖档、大盘±0.3% 会自动分析（最短 " + gapS + " 秒/次，仅交易时段）" + trig;
+        } else {
+          rtTxt = "自动模式：每 15 分钟分析一次（勾选「实时跟踪」可改为事件触发）";
+        }
+        note.textContent = "已配置 Key（" + maskKey(String(st.aiKey)) + "）" + extra + "；" + rtTxt +
+          "。若后台无记录，请核对后台 API Key 是否与此 Key 一致。";
       } else note.textContent = "未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。";
     }
     try { renderAIStats(); } catch (e) {}
@@ -4073,6 +4189,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     });
     if (m) m.addEventListener("change", function () { st.aiModel = m.value.trim(); save({ aiModel: st.aiModel }); });
     if (a) a.addEventListener("change", function () { st.aiAuto = !!a.checked; save({ aiAuto: st.aiAuto }); });
+    var rt = $("aiRealtime");
+    if (rt) {
+      rt.checked = st.aiRealtime !== false;
+      rt.addEventListener("change", function () {
+        st.aiRealtime = !!rt.checked;
+        save({ aiRealtime: st.aiRealtime });
+        try { updateAITop(); } catch (e) {}
+      });
+    }
     var g = $("aiGen");
     if (g) g.addEventListener("click", function () { generateAIBrief(true); });
     var tt = $("aiTest");
@@ -5922,7 +6047,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
         try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
         try { if (st.anaCode !== st.code || !st.anaAt || Date.now() - st.anaAt >= 15 * 60 * 1000) renderAnalysisCard(); } catch (e) { /* 简报失败不阻塞 */ }
-        try { maybeAIBrief(); } catch (e) { /* AI 失败不阻塞 */ }
+        try { maybeAIRealtime(); } catch (e) { /* AI 失败不阻塞 */ }
         try { paintAINotes(); } catch (e) { /* AI 解读失败不阻塞 */ }
         try {
           if (st.watch.length > 1 && Date.now() - multiLiveAt > 15000) fetchMultiLive();

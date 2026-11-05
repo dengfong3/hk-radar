@@ -1661,5 +1661,17 @@ ok("按天累计调用与 tokens", html.includes("bumpAIStats") && html.includes
 ok("显示估算费用", html.includes("估算 ¥") && html.includes("以控制台为准"));
 ok("可本机重置统计", html.includes("aiStatsReset") && html.includes("清空本机用量统计"));
 
+
+/* ---------- 67) AI 实时跟踪（事件触发） ---------- */
+console.log("\n[AI 实时跟踪]");
+ok("实时跟踪开关", html.includes('id="aiRealtime"'));
+ok("事件触发逻辑覆盖价格/均价/量能/信号/洗盘/档位/大盘/异动",
+  ["aiRealtimeTrigger", "价格波动", "穿越当日均价", "分钟量能放大", "洗盘/出货变化", "接近", "大盘波动", "盘中异动"]
+    .every(function (k) { return html.indexOf(k) >= 0; }));
+ok("仅交易时段 + 最短间隔", html.includes("marketPhase(new Date(), st.code) !== \"open\"") && html.includes("aiMinGapMs"));
+ok("页面不可见时不调用", html.includes("document.hidden"));
+ok("AI 结论变化弹窗提示", html.includes("notifyAIAction") && html.includes("AI 实时提示"));
+ok("关闭实时退回15分钟自动", html.includes("st.aiRealtime === false") && html.includes("maybeAIBrief()"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
