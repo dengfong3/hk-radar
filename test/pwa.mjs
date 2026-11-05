@@ -1727,11 +1727,22 @@ ok("未配置时点击先展开配置", html.includes("if (!hasAIKey()) { openAI
 /* ---------- 74) 统一信号（消除卡片/弹窗互相矛盾） ---------- */
 console.log("\n[统一信号]");
 ok("统一信号函数", html.includes("function unifiedSignal") && html.includes("function unifyBuyAllowed"));
-ok("买点弹窗必须通过统一结论", html.includes("lastUnified.buy || lastUnified.sell") && html.includes("unifyBuyAllowed()"));
+ok("买点弹窗统一由超短线信号触发", html.includes("maybeUshortAlert") && html.includes("if (false) { // 买卖点弹窗统一由"));
 ok("统一结论不允许买入时撤销买点弹窗", html.includes("function pruneBuyAlerts") && html.includes("pruneBuyAlerts(st.code)"));
 ok("信号卡显示统一结论", html.includes('id="unifiedNote"') && html.includes("统一结论："));
 ok("冲突会被记录并屏蔽", html.includes("盘中出现买点（") && html.includes("已屏蔽冲突提示"));
 ok("AI 以统一结论为最终口径", html.includes("以输入里的 unified 为最终结论") && html.includes("unified: (typeof lastUnified"));
+
+
+/* ---------- 75) 超短线 T+1 统一买卖信号 ---------- */
+console.log("\n[超短线 T+1]");
+ok("超短线信号卡", html.includes('id="usBox"') && html.includes("⚡ 超短线信号（T+1）"));
+ok("规则+AI 合并为统一信号", html.includes("function ushortSignal") && html.includes("aiUltraParse") && html.includes("规则买点 + AI 一致"));
+ok("AI 输出 ultraShort 字段", html.includes('"ultraShort"') && html.includes("nextDayPlan") && html.includes("confidence"));
+ok("T+1 时间闸门", html.includes("14:45 后不提示买入") && html.includes("14 * 60 + 45"));
+ok("超短线弹窗及时提示", html.includes("function maybeUshortAlert") && html.includes("超短线买入信号（T+1）"));
+ok("旧买点弹窗停用、异动只保留卖点", html.includes("买点弹窗统一由「超短线信号」触发") && html.includes('_gate.level !== "buy"'));
+ok("无 Key 时规则版超短线可用", html.includes("规则版（未配置 AI）") && html.includes("规则买点（无 AI 确认）"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

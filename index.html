@@ -283,6 +283,16 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 .aibrieftext{white-space:pre-wrap;font-size:12.5px;line-height:1.62;color:#e7ecf3;margin:2px 0 6px}
 .aibriefrisk{color:#fca5a5}
 .rulepre{white-space:pre-wrap;font-size:10.5px;line-height:1.45;margin:0;color:#cbd5e1;font-family:inherit}
+#usBox .ushead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 6px}
+#usBox .usbadge{font-size:14px;font-weight:700;padding:2px 10px;border-radius:8px;border:1px solid var(--line)}
+#usBox .usbadge.buy{color:#fecaca;border-color:#b91c1c;background:#3b0d0d}
+#usBox .usbadge.sell{color:#bae6fd;border-color:#0369a1;background:#0b2540}
+#usBox .usbadge.weak{color:#fde68a;border-color:#a16207;background:#2a1f0a}
+#usBox .usbadge.wait{color:#cbd5e1;border-color:var(--line);background:var(--card2)}
+#usBox .usconf{font-size:11px;color:var(--dim)}
+#usBox .us_src{font-size:10px;color:var(--dim2)}
+#usBox .usline{font-size:11.5px;color:#e2e8f0;display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 5px}
+#usBox .usline b{color:#fff}
 .disclaimer{font-size:10px;color:var(--dim2);line-height:1.7;margin-top:10px;padding:9px;
   border:1px solid var(--line2);border-radius:9px}
 </style>
@@ -350,6 +360,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     <button id="tabM30">30分</button>
     <button id="tabM60">60分</button>
   </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><b>⚡ 超短线信号（T+1）</b><span class="sp"></span><span id="usMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="usBox"></div>
 </div>
 
 <div class="card">
@@ -3391,7 +3406,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.78 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.79 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3711,13 +3726,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       marketVsStock: (indexData && indexData.pct != null && metrics.changePct != null)
         ? { benchmark: indexData.code, benchmarkChgPct: indexData.pct, relativePct: metrics.changePct - indexData.pct } : null,
       ruleSummary: lastRuleBrief,
-      unified: (typeof lastUnified !== "undefined" ? lastUnified : null)
+      unified: (typeof lastUnified !== "undefined" ? lastUnified : null),
+      tradeStyle: lastUshort ? { type: "超短线 T+1（今天买、明天卖；14:45 后不提示买入）", action: lastUshort.action, conf: lastUshort.conf } : { type: "超短线 T+1（今天买、明天卖；14:45 后不提示买入）" }
     };
   }
   function aiSystemPrompt() {
     return "你是A股/港股实时盘面分析助手，只依据用户提供的实时数据做判断，禁止编造数据；缺失就明确说明。\n" +
       "必须结合三层：①个股结构与量价 ②所属板块强弱 ③大盘环境，引用具体数字与价位，并指出矛盾点（例如个股强于板块但大盘弱）。\n" +
       "信号口径：以输入里的 unified 为最终结论（action / buy / reasons / conflicts）。若 unified.buy 为 false，禁止给出买入建议；若各卡片信号冲突，要明确指出并按 unified 收敛，不得各说各话。\n" +
+      "交易风格：本系统用于超短线 T+1（今天买、明天卖）。ultraShort 必须给可执行的当日买卖点、止损、目标与次日卖出计划；14:45 后不建议买入；规则统一结论为“不交易/观望”时 ultraShort.action 必须为 wait；宁可 wait 也不要勉强给买点。\n" +
       "只输出一个 JSON 对象（不要 markdown 代码块、不要多余文字），键如下，每个值是 60~140 字中文：\n" +
       '{"brief":"总体结论：当前适合持股/减仓/清仓/观望/建仓 + 核心理由 + 具体动作（有持仓则给股数）",' +
       '"pricePlan":"下一步买卖点：结合减仓档/加仓档/止损给出当前该做什么",' +
@@ -3730,7 +3747,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       '"macro":"日线/盘口/大盘：趋势、委比、指数环境对个股的助力或拖累",' +
       '"pool":"尾盘观察池：池子里的票与当前个股/板块的联动（无数据就说明）",' +
       '"tradePlan":"交易计划：若用户有持仓/交易计划，给出按当前分析的调整建议（无计划则给出可执行计划框架）",' +
-      '"risk":"风险提示（含不构成投资建议）"}\n' +
+      '"risk":"风险提示（含不构成投资建议）",' +
+      '"ultraShort":{"action":"buy|sell|wait","confidence":0,"entryLow":0,"entryHigh":0,"stop":0,"target":0,"nextDayPlan":"明日卖出计划（高开/平开/低开分别怎么处理）","reason":"一句话理由"}}\n' +
       "数值要来自输入数据；不要给虚假目标价；不要承诺收益。";
   }
   function parseAICards(raw) {
@@ -3986,8 +4004,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         st.aiUsage = res.usage || null; st.aiApiModel = res.apiModel || res.model;
         bumpAIStats(res.usage, st.aiApiModel);
         st.aiHttpStatus = res.httpStatus || 200; st.aiLatencyMs = res.latencyMs || null;
+        st.aiUltra = aiUltraParse(res.cards); lastUshortAlertKey = "";
         try { save({ aiAt: st.aiAt, aiCode: st.aiCode, aiCards: st.aiCards, aiText: st.aiText, aiModelUsed: st.aiModelUsed,
-          aiUsage: st.aiUsage, aiApiModel: st.aiApiModel, aiHttpStatus: st.aiHttpStatus, aiLatencyMs: st.aiLatencyMs }); } catch (e) {}
+          aiUsage: st.aiUsage, aiApiModel: st.aiApiModel, aiHttpStatus: st.aiHttpStatus, aiLatencyMs: st.aiLatencyMs, aiUltra: st.aiUltra }); } catch (e) {}
         var txt = st.aiText + (res.cards.risk ? "\n\n风险提示：" + res.cards.risk : "");
         if (out) out.textContent = txt;
         var ts = new Date();
@@ -3999,6 +4018,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try { st.aiSnap = aiSnapNow(); } catch (e) {}
         try { notifyAIAction(res.cards); } catch (e) {}
         try { rerenderForAINotes(); } catch (e) {}
+        try { renderUshortCard(); maybeUshortAlert(); } catch (e) {}
         try { updateAITop(); } catch (e) {}
         try { save({ aiTriggerAt: st.aiTriggerAt, aiSnap: st.aiSnap, lastAIAction: st.lastAIAction }); } catch (e) {}
       })
@@ -4683,6 +4703,141 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (alertQueue.length !== before) renderAlert();
     } catch (e) {}
   }
+  function numOr(v) { var n = Number(v); return isFinite(n) ? n : null; }
+  /** 解析 AI 返回里的超短线字段（没有结构化字段时按文字倾向推断） */
+  function aiUltraParse(cards) {
+    try {
+      if (!cards) return { action: "wait", confidence: 0, reason: "AI 未返回", source: "AI" };
+      var u = cards.ultraShort, act = "", conf = 60, eL = null, eH = null, stop = null, tgt = null, ndp = "", rs = "";
+      if (u && typeof u === "object") {
+        act = String(u.action || "").toLowerCase();
+        conf = numOr(u.confidence); if (conf == null) conf = 60;
+        eL = numOr(u.entryLow); eH = numOr(u.entryHigh); stop = numOr(u.stop); tgt = numOr(u.target);
+        ndp = String(u.nextDayPlan || ""); rs = String(u.reason || "");
+      } else {
+        var t = [cards.brief, cards.pricePlan, cards.signal, cards.entry].filter(Boolean).join(" ");
+        if (/建议买入|可买入|建仓|买入信号|加仓/.test(t)) { act = "buy"; conf = 60; rs = "AI 文字倾向买入（未返回结构化字段）"; }
+        else if (/建议卖出|减仓|清仓|止损/.test(t)) { act = "sell"; conf = 60; rs = "AI 文字倾向卖出（未返回结构化字段）"; }
+        else { act = "wait"; rs = "AI 未给明确方向"; }
+      }
+      if (/buy|买|做多/.test(act)) act = "buy";
+      else if (/sell|卖|减|清/.test(act)) act = "sell";
+      else act = "wait";
+      return { action: act, confidence: (act === "wait" ? 0 : Math.max(0, Math.min(100, conf))),
+        entryLow: eL, entryHigh: eH, stop: stop, target: tgt, nextDayPlan: ndp, reason: rs, source: "AI", at: Date.now() };
+    } catch (e) { return null; }
+  }
+  /** 超短线（T+1）统一信号：规则 + AI 合并，作为弹窗与展示的唯一口径 */
+  function ushortSignal() {
+    try {
+      var u = unifiedSignal();
+      var ai = (st.aiCode === st.code && st.aiUltra) ? st.aiUltra : null;
+      var pos = curPos();
+      var out = { action: "wait", label: "观望", conf: 0, reasons: [], conflicts: [],
+        entryLo: null, entryHi: null, stop: null, target: null, rr: null, nextDayPlan: "",
+        ruleAction: u ? u.action : "", aiAction: ai ? ai.action : null, source: [], at: Date.now() };
+      if (!u) { out.reasons = ["等待行情…"]; return out; }
+      var sp = lastSetup;
+      if (sp && sp.ok) {
+        if (sp.entry) { out.entryLo = sp.entry.lo; out.entryHi = sp.entry.hi; }
+        if (sp.stop != null) out.stop = sp.stop;
+        if (sp.target != null) out.target = sp.target;
+        if (sp.rr != null) out.rr = sp.rr;
+      }
+      if (u.buy) {
+        if (!hasAIKey() || !ai) { out.action = "buy"; out.conf = u.score || 60; out.source = ["规则"]; out.reasons = ["规则买点（无 AI 确认）"]; }
+        else if (ai.action === "buy") {
+          out.action = "buy"; out.conf = Math.round(((u.score || 60) + (ai.confidence || 60)) / 2);
+          out.source = ["规则", "AI"];
+          if (ai.entryLow != null && ai.entryHigh != null) { out.entryLo = ai.entryLow; out.entryHi = ai.entryHigh; }
+          if (ai.stop != null) out.stop = ai.stop;
+          if (ai.target != null) out.target = ai.target;
+          out.nextDayPlan = ai.nextDayPlan || "";
+          out.reasons = ["规则买点 + AI 一致（" + (ai.reason || "方向一致") + "）"];
+        } else {
+          out.action = "weak"; out.conf = Math.round((u.score || 60) * 0.8); out.source = ["规则"];
+          out.reasons = ["规则买点已出现，但 AI 未确认（" + (ai.reason || ai.action) + "）：等确认再动手"];
+        }
+      } else if (u.sell) {
+        out.action = "sell"; out.conf = u.score || 60; out.source = ["规则"];
+        out.reasons = (u.reasons && u.reasons.length) ? u.reasons.slice(0, 2) : ["统一信号转空/需减仓"];
+      } else if (ai && ai.action === "sell" && pos.shares > 0) {
+        out.action = "sell"; out.conf = Math.max(50, ai.confidence || 60); out.source = ["AI"];
+        out.reasons = ["AI 建议卖出/减仓：" + (ai.reason || "")]; out.nextDayPlan = ai.nextDayPlan || "";
+      } else if (ai && ai.action === "buy") {
+        out.action = "weak"; out.conf = 0; out.source = ["AI"];
+        out.reasons = ["AI 偏多，但规则否决：" + ((u.reasons && u.reasons[0]) || "不交易")];
+      } else {
+        out.action = "wait"; out.reasons = (u.reasons && u.reasons.length) ? u.reasons.slice(0, 2) : [u.action || "观望"];
+      }
+      if (u.buy && ai && ai.action === "sell") out.conflicts.push("规则买点 vs AI 卖点：以保守为先，暂不买入");
+      if (!out.nextDayPlan) out.nextDayPlan = "次日高开冲高不破均价可持有；平开看量能；低开跌破止损离场";
+      var now = new Date(), mins = now.getHours() * 60 + now.getMinutes();
+      if ((out.action === "buy" || out.action === "weak") && mins >= 14 * 60 + 45) {
+        out.reasons = ["14:45 后不提示买入（T+1 无法当日卖出）"].concat(out.reasons);
+        out.action = "wait"; out.conf = 0;
+      }
+      if (out.action === "buy" && out.conf < 60) out.action = "weak";
+      out.label = out.action === "buy" ? "超短线买入信号" : out.action === "sell" ? "超短线卖出/减仓"
+        : out.action === "weak" ? "买点待确认" : ((u && u.action === "不交易") ? "不交易" : "观望");
+      out.at = Date.now();
+      return out;
+    } catch (e) { return null; }
+  }
+  var lastUshort = null, lastUshortAlertKey = "";
+  function renderUshortCard() {
+    var box = $("usBox"), meta = $("usMeta");
+    if (!box) return;
+    var us = ushortSignal();
+    lastUshort = us;
+    if (!us) { box.innerHTML = '<div class="sigwhy">等待行情…</div>'; return; }
+    if (meta) meta.textContent = "T+1 · " + (us.source.length ? us.source.join("+") : "规则") + " · " + hhmmOf(us.at);
+    var cls = us.action === "buy" ? "buy" : us.action === "sell" ? "sell" : us.action === "weak" ? "weak" : "wait";
+    var h = '<div class="ushead"><span class="usbadge ' + cls + '">' + us.label + "</span>" +
+      '<span class="usconf">' + (us.conf > 0 ? "置信 " + us.conf : "置信 --") + '</span><span class="sp"></span>' +
+      '<span class="us_src">' + (hasAIKey() ? (us.aiAction ? "规则 + AI" : "规则 · AI 未确认") : "规则版（未配置 AI）") + "</span></div>";
+    if (us.entryLo != null && (us.action === "buy" || us.action === "weak" || us.action === "sell")) {
+      var _l1 = us.action === "sell" ? "卖出" : "买点";
+      var _l2 = us.action === "sell" ? "回升失效" : "止损";
+      h += '<div class="usline">' + _l1 + ' <b>' + fmtP(us.entryLo) + (us.entryHi != null ? "–" + fmtP(us.entryHi) : "") + "</b>" +
+        "<span>" + _l2 + " <b>" + fmtP(us.stop) + "</b></span><span>目标 <b>" + fmtP(us.target) + "</b></span>" +
+        "<span>RR <b>" + (us.rr == null ? "--" : us.rr) + "</b></span></div>";
+    } else if (us.action !== "sell") {
+      h += '<div class="sigwhy">当前不交易/观望：不给出执行价位，等统一信号转为可买/可卖再提示。</div>';
+    }
+    h += '<div class="sigwhy"><b>明日卖出计划：</b>' + escHtml(us.nextDayPlan) + "</div>";
+    if (us.reasons && us.reasons.length) h += '<div class="sigwhy">依据：' + escHtml(us.reasons.join(" · ")) + "</div>";
+    if (us.conflicts && us.conflicts.length) h += '<div class="sigveto">' + escHtml(us.conflicts[0]) + "</div>";
+    h += '<div class="tradebar"><button class="btn" id="usAiBtn">' + (hasAIKey() ? "立即 AI 分析" : "配置 AI") +
+      '</button><button class="btn" id="usMuteBtn">静音 30 分钟</button></div>';
+    box.innerHTML = h;
+    var ab = $("usAiBtn");
+    if (ab) ab.addEventListener("click", function () { if (!hasAIKey()) openAIConfig(); else generateAIBrief(true); });
+    var mb = $("usMuteBtn");
+    if (mb) mb.addEventListener("click", function () { try { muteUntil = Date.now() + 30 * 60 * 1000; } catch (e) {} });
+  }
+  /** 超短线买卖信号弹窗：规则+AI 统一后，方向出现/变化时立即提示 */
+  function maybeUshortAlert() {
+    try {
+      var us = lastUshort || ushortSignal();
+      if (!us) return;
+      if (us.action !== "buy" && us.action !== "sell") { lastUshortAlertKey = ""; return; }
+      if (us.conf < 60) return;
+      var id = "ushort:" + st.code + ":" + us.action + ":" + (us.entryLo != null ? us.entryLo.toFixed(2) : "x") + ":" + (us.stop != null ? us.stop.toFixed(2) : "x");
+      if (lastUshortAlertKey === id) return;
+      lastUshortAlertKey = id;
+      var txt;
+      if (us.action === "buy") {
+        txt = "⚡ 超短线买入信号（T+1）：买点 " + (us.entryLo != null ? fmtP(us.entryLo) + "–" + fmtP(us.entryHi) : "现价") +
+          " · 止损 " + fmtP(us.stop) + " · 目标 " + fmtP(us.target) + " · 明日卖出计划：" + us.nextDayPlan +
+          "（规则+AI 统一信号，非预测，T+1）";
+      } else {
+        txt = "⚡ 超短线卖出信号（T+1）：" + (us.reasons[0] || "统一信号转空") +
+          " · 减仓/离场后次日再评估（规则+AI 统一信号，非预测）";
+      }
+      alertOnce(id, us.action === "buy" ? "buy" : "sell", txt, metrics ? metrics.price : null, 10 * 60 * 1000);
+    } catch (e) { /* 弹窗失败不影响 */ }
+  }
   function updateUnifiedNote(u) {
     var el = $("unifiedNote");
     if (!el) return;
@@ -5125,7 +5280,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         // 买卖点弹窗：只有"强买点"和"卖点/风控"才弹（普通试探买点只在卡片显示）
         try {
           var _gate = C.burstAlertGate(b, mpData, metrics, { market: C.marketOf(st.code), ea: lastEntryAdvice, now: new Date() });
-          if (_gate.popup && (_gate.level !== "buy" || unifyBuyAllowed())) {
+          if (_gate.popup && _gate.level !== "buy") { // 买点弹窗统一由「超短线信号」触发，避免重复/矛盾
             alertOnce("burst:" + st.code + ":" + (isSell ? "sell" : "buy") + ":" + b.kind + ":" + b.at,
               _gate.level,
               (isSell ? "【关键卖点·风控】" : "【关键买点】") + b.kind + " · " + (isSell ? "卖出 " : "入场 ") + b.entry +
@@ -5357,7 +5512,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     lastUnified = unifiedSignal();
     // 买卖点弹窗：必须通过「统一结论」（智能信号 + 异动 + 持仓一致）才弹
     try {
-      if (lastUnified && (lastUnified.buy || lastUnified.sell) && (sp.grade === "A" || sp.grade === "B") && (sp.side === "long" || sp.side === "reduce")) {
+      if (false) { // 买卖点弹窗统一由「超短线信号」触发，避免多个弹窗口径不一
         var _d = sp.side === "long" ? "买点" : "减仓/卖点";
         var _zone = sp.entry ? (sp.entry.lo.toFixed(2) + "–" + sp.entry.hi.toFixed(2)) : ("现价 " + (metrics ? metrics.price : "--"));
         alertOnce("smart:" + st.code + ":" + sp.side + ":" + sp.grade,
@@ -6534,6 +6689,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         try {
           lastUnified = unifiedSignal();
           updateUnifiedNote(lastUnified);
+          renderUshortCard();
+          maybeUshortAlert();
           if (!lastUnified || !lastUnified.buy) pruneBuyAlerts(st.code);
           if (lastUnified && lastUnified.conflicts && lastUnified.conflicts.length) {
             // 冲突只在信号卡里说明，不再额外弹“买点”误导
@@ -6668,7 +6825,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     save({ code: st.code, watch: st.watch });
     parsed = null; metrics = null; metricsCode = ""; lastActive = {}; alertQueue = []; renderAlert();
     try { paintCardPrices(); } catch (e) {}
-    try { st.aiCode = ""; var _ao = $("aiOut"); if (_ao) _ao.textContent = ""; } catch (e) {}
+    try { st.aiCode = ""; st.aiUltra = null; lastUshort = null; lastUshortAlertKey = ""; var _ao = $("aiOut"); if (_ao) _ao.textContent = ""; } catch (e) {}
     try { renderBurstCard(); } catch (e) {}
     $("codeInput").value = C.displayCode(code);
     renderChips(); renderPlanSummary(); bindPosInputs();
