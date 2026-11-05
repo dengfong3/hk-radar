@@ -257,9 +257,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 .sinote{margin:0 0 5px;font-size:12px;line-height:1.58;color:#d1fae5;background:rgba(16,185,129,.12);
   border-left:3px solid #34d399;padding:7px 9px;border-radius:6px;white-space:pre-wrap;font-weight:500}
 .airuletoggle{font-size:10px;color:#7c8aa0;margin:1px 0 5px;cursor:pointer;user-select:none}
-.aiquick{display:inline-block;font-size:10px;color:#7dd3fc;border:1px dashed #2b4a6b;border-radius:6px;
-  padding:1px 7px;margin:3px 0 2px;cursor:pointer;user-select:none}
-.aiquick:hover{border-color:var(--accent);color:#bae6fd}
+
 .airuletoggle:hover{color:#a9b6c9}
 .airulehide > *:not(.sinote):not(.airuletoggle){display:none}
 .aibrieftext{white-space:pre-wrap;font-size:12.5px;line-height:1.62;color:#e7ecf3;margin:2px 0 6px}
@@ -282,11 +280,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="airow">
     <input id="aiKey" type="password" placeholder="DeepSeek API Key（仅存本机，sk-...）" autocomplete="off">
     <input id="aiModel" class="aimodel" placeholder="deepseek-v4.1-flash" autocomplete="off">
-    <button class="btn" id="aiGen">生成 AI 分析</button>
     <button class="btn" id="aiTest">测试连接</button>
     <button class="btn" id="aiClearKey">清除</button>
     <label class="ailbl"><input type="checkbox" id="aiAuto" checked>自动15分钟</label>
-    <label class="ailbl"><input type="checkbox" id="aiRealtime" checked>实时跟踪</label>
+    <label class="ailbl"><input type="checkbox" id="aiRealtime">实时跟踪</label>
+    <button class="btn" id="aiGen" title="立即调用 DeepSeek 一次，刷新全部卡片（约消耗 1 次请求）">立即 AI 分析</button>
   </div>
   <div class="ainote" id="aiTopNote">未配置大模型 Key：当前只能用普通功能（规则版）；填入 Key 后，全部卡片显示 AI 深度解读。</div>
   <div class="aistats" id="aiStats" style="display:none"></div>
@@ -3367,7 +3365,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.71 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.72 · 2026-11-05";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3510,14 +3508,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         (aiBrief
           ? '<div class="aibrieftext">' + escHtml(aiBrief) + "</div>" +
             (cards.risk ? '<div class="sigwhy aibriefrisk">风险提示：' + escHtml(String(cards.risk)) + "</div>" : "")
-          : '<div class="hint">还没有 AI 简报：点「立即生成 AI 简报」，AI 会结合个股 / 板块 / 大盘做实时分析。</div>') +
+          : '<div class="hint">还没有 AI 简报：点顶部「立即 AI 分析」按钮，AI 会结合个股 / 板块 / 大盘做实时分析。</div>') +
         '<div class="tradebar">' +
-        '<button class="btn" id="anaAIGen">立即生成 AI 简报</button>' +
         '<button class="btn" id="anaAICopy">复制 AI 简报</button>' +
         '<button class="btn" id="anaRuleToggle">' + (st.showMachineBrief ? "隐藏机器摘要" : "显示机器摘要") + "</button></div>" +
         (st.showMachineBrief ? '<div class="hint">机器摘要（规则版，供核对）</div><pre class="rulepre">' + escHtml(text) + "</pre>" : "");
-      var ag = box.querySelector("#anaAIGen");
-      if (ag) ag.addEventListener("click", function () { generateAIBrief(true); });
       var ac = box.querySelector("#anaAICopy");
       if (ac) ac.addEventListener("click", function () {
         try {
@@ -3892,14 +3887,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (!txt) {
         if (note && note.parentNode) note.parentNode.removeChild(note);
         if (tg && tg.parentNode) tg.parentNode.removeChild(tg);
-        var qk0 = box.querySelector ? box.querySelector(".aiquick") : null;
-        if (!qk0 && hasAIKey()) {
-          qk0 = document.createElement("div");
-          qk0.className = "aiquick";
-          qk0.textContent = "🔄 立即 AI 分析（手动调用 DeepSeek 一次）";
-          qk0.addEventListener("click", function () { generateAIBrief(true); });
-          box.appendChild(qk0);
-        }
+
         // 恢复被折叠的规则内容（用内联样式，不用持久 class，避免重渲染后被"永久隐藏"）
         Array.prototype.slice.call(box.children).forEach(function (ch) {
           if (ch && ch.getAttribute && ch.getAttribute("data-airule-disp") != null) {
@@ -3928,16 +3916,6 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       }
       note.textContent = "🤖 AI：" + String(txt).replace(/\*\*/g, "");
       applyRuleVisibility(box, tg, key);
-      /* 手动 AI 刷新按钮（每张卡片都有；点一下立即调用一次 DeepSeek） */
-      var quick = box.querySelector ? box.querySelector(".aiquick") : null;
-      if (!quick) {
-        quick = document.createElement("div");
-        quick.className = "aiquick";
-        quick.textContent = "🔄 立即 AI 分析（手动调用 DeepSeek 一次，刷新全部卡片）";
-        quick.title = "立即调用 DeepSeek 做一次深度分析（约消耗 1 次请求）";
-        quick.addEventListener("click", function () { generateAIBrief(true); });
-        box.appendChild(quick);
-      }
     }
   }
   function rerenderForAINotes() {
@@ -4143,7 +4121,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
           }
           rtTxt = "实时跟踪中：价格波动≥0.4%、量能≥2.2×、信号/洗盘变化、接近买卖档、大盘±0.3% 会自动分析（最短 " + gapS + " 秒/次，仅交易时段）" + trig;
         } else {
-          rtTxt = "默认模式：每 15 分钟自动分析一次；想看更快的，点各卡片里的「🔄 立即 AI 分析」马上调用，或勾选「实时跟踪」改为事件触发";
+          rtTxt = "默认模式：每 15 分钟自动分析一次；想看更快的，点顶部「立即 AI 分析」马上调用一次，或勾选「实时跟踪」改为事件触发";
         }
         note.textContent = "已配置 Key（" + maskKey(String(st.aiKey)) + "）" + extra + "；" + rtTxt +
           "。若后台无记录，请核对后台 API Key 是否与此 Key 一致。";

@@ -1599,7 +1599,7 @@ ok("AI 设置区置顶（在顶部卡片）", html.includes('id="aiTopCard"') &&
 ok("无 Key 提示与配置按钮", html.includes("未配置大模型 Key") && html.includes('id="aiKey"') && html.includes('id="aiGen"'));
 ok("无 Key 时用机器简报（上一版方式）", html.includes("机器简报（规则版") && html.includes("等同上一版方式"));
 ok("无 Key 时只有简版提示（可展开机器简报）", html.includes("anaConfig") && html.includes("anaShowMachine") && html.includes("anaCopy"));
-ok("有 Key 时 AI 简报进入主卡", html.includes("aibrieftext") && html.includes("立即生成 AI 简报") && html.includes("复制 AI 简报"));
+ok("有 Key 时 AI 简报进入主卡", html.includes("aibrieftext") && html.includes("立即 AI 分析") && html.includes("复制 AI 简报"));
 
 
 /* ---------- 60) AI 全卡分析 + Key 安全 ---------- */
@@ -1623,7 +1623,7 @@ ok("配置弹到简报卡", html.includes("openAIConfig") && html.includes("scro
 
 /* ---------- 62) AI 为主：一键生成 + 规则明细折叠 ---------- */
 console.log("\n[AI 为主]");
-ok("简报卡一键生成 AI 简报", html.includes('id="anaAIGen"') && html.includes("generateAIBrief(true)"));
+ok("手动 AI 入口统一在顶部", html.includes('id="aiGen"') && !html.includes('id="anaAIGen"'));
 ok("简报卡可复制 AI 简报", html.includes("anaAICopy"));
 ok("有 Key 时 AI 简报为主、机器摘要可折叠", html.includes("机器摘要（规则版，供核对）") && html.includes("anaRuleToggle"));
 ok("各卡片 AI 解读置顶", html.includes("AI_CARD_MAP") && html.includes("insertBefore(note, box.firstChild"));
@@ -1676,9 +1676,9 @@ ok("默认15分钟自动（实时需主动勾选）", html.includes("st.aiRealti
 
 /* ---------- 68) 卡片内手动 AI 按钮 ---------- */
 console.log("\n[卡片内手动 AI]");
-ok("每张卡片有立即 AI 分析按钮", html.includes("aiquick") && html.includes("立即 AI 分析（手动调用 DeepSeek 一次"));
-ok("点击即调用一次 DeepSeek", html.includes("generateAIBrief(true)") && html.includes("刷新全部卡片"));
-ok("无 AI 结果也可手动触发", html.includes("!qk0 && hasAIKey()"));
+ok("仅在顶部「实时跟踪」右侧放「立即 AI 分析」", html.includes('id="aiGen"') && html.includes("立即 AI 分析") && !html.includes("aiquick"));
+ok("按钮顺序在实时跟踪之后", html.indexOf('id="aiRealtime"') < html.indexOf('id="aiGen"'));
+ok("点击调用一次 DeepSeek 刷新全部卡片", html.includes("generateAIBrief(true)") && html.includes("刷新全部卡片"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
