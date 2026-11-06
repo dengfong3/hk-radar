@@ -1797,5 +1797,15 @@ ok("浮盈回撤预警", html.includes("浮盈自高点回撤") && html.includes
 ok("预警状态与弹窗", html.includes("冲高回落·减仓预警") && html.includes("us.action !== \"warn\"") && html.includes("持仓预警（冲高回落/走弱）"));
 ok("预警为减仓提醒而非清仓", html.includes("反弹到均价 ") && html.includes("减 1/3～1/2"));
 
+
+/* ---------- 81) AI 关键位敏感度 ---------- */
+console.log("\n[AI 关键位敏感度]");
+ok("AI止损/目标参与卖出触发", html.includes("跌破 AI 止损") && html.includes("到 AI 目标"));
+ok("接近AI止损预警", html.includes("接近 AI 止损") && html.includes("_p - ai.stop"));
+ok("卡片显示AI关键位", html.includes("AI 关键位：止损") && html.includes("us.aiStop"));
+ok("持仓事件驱动AI分析", html.includes("function maybeAIHoldEvent") && html.includes("接近/到 AI 目标") && html.includes("3 分钟冷却"));
+ok("AI必须给持仓关键位", html.includes("都必须填写 stop 与 target"));
+ok("卖出弹窗带AI关键位", html.includes("AI止损 ") && html.includes("AI目标 "));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
