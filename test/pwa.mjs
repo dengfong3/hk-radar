@@ -1875,5 +1875,12 @@ ok("AI 对照函数", html.includes("function aiLogRecord") && html.includes("fu
 ok("AI 记录本地存储", html.includes("save({ aiLog: st.aiLog })") && html.includes("aiEvalOne"));
 ok("AI 成功后记录", html.includes("st.aiUltra = aiUltraParse(res.cards)") && html.includes("aiLogRecord()"));
 
+
+/* ---------- 87) AI vs 规则冲突胜负（v0.93） ---------- */
+console.log("\n[AI vs 规则冲突]");
+ok("冲突统计函数", html.includes("function aiConflictStats"));
+ok("四类冲突", html.includes("AI 买 / 规则不买") && html.includes("规则买 / AI 不买") && html.includes("AI 卖 / 规则不卖") && html.includes("规则卖 / AI 不卖"));
+ok("AI/规则胜负计数", html.includes("AI 对 ") && html.includes("规则对 ") && html.includes("冲突合计"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
