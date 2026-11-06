@@ -1807,5 +1807,34 @@ ok("持仓事件驱动AI分析", html.includes("function maybeAIHoldEvent") && h
 ok("AI必须给持仓关键位", html.includes("都必须填写 stop 与 target"));
 ok("卖出弹窗带AI关键位", html.includes("AI止损 ") && html.includes("AI目标 "));
 
+
+/* ---------- 82) 多周期指标矩阵（第一步） ---------- */
+console.log("\n[多周期指标矩阵]");
+ok("导出 RSI/BOLL/OBV/背离", !!(C.rsiCalc && C.bollCalc && C.obvCalc && C.volPriceDivergence));
+// RSI 范围
+(function () {
+  const closes = [10, 10.5, 10.2, 10.8, 11, 10.9, 11.2, 11.5, 11.3, 11.6, 11.8, 11.7, 12, 12.2, 12.1, 12.4];
+  const r = C.rsiCalc(closes, 14);
+  ok("RSI 在 0-100 之间", r != null && r >= 0 && r <= 100, r);
+})();
+// BOLL 三轨顺序
+(function () {
+  const bars = [];
+  for (let i = 0; i < 30; i++) bars.push({ o: 10 + i * 0.1, h: 10.2 + i * 0.1, l: 9.8 + i * 0.1, c: 10 + i * 0.1, v: 100 });
+  const b = C.bollCalc(bars, 20, 2);
+  ok("BOLL 上轨>中轨>下轨且 %B 有值", b && b.up > b.mid && b.mid > b.low && b.pos != null, b && b.pos);
+})();
+// OBV 与背离
+(function () {
+  const bars = [];
+  for (let i = 0; i < 30; i++) bars.push({ o: 10, h: 10.5, l: 9.5, c: 10 + i * 0.1, v: 100 + i });
+  const o = C.obvCalc(bars), d = C.volPriceDivergence(bars);
+  ok("OBV 有趋势", o && (o.trend === "up" || o.trend === "down" || o.trend === "flat"));
+  ok("背离取值合法", ["none", "top", "bottom"].indexOf(d) >= 0, d);
+})();
+ok("指标矩阵卡片", html.includes('id="mtxBox"') && html.includes("多周期指标矩阵") && html.includes('<th>RSI</th>') && html.includes('<th>BOLL</th>') && html.includes('<th>背离</th>'));
+ok("矩阵渲染函数", html.includes("function buildIndicatorMatrix") && html.includes("function renderMatrixCard") && html.includes("C.rsiCalc"));
+ok("AI 输入指标矩阵", html.includes("indicatorMatrix: buildIndicatorMatrix") && html.includes("指标矩阵硬要求"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

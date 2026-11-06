@@ -261,6 +261,15 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   #aiTopCard .aimodel{flex:1 1 100%}
   #aiTopCard .airow button{flex:1 1 auto}
 }
+#mtxBox .mtxwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+#mtxBox table.mtx{width:100%;border-collapse:collapse;font-size:10px;white-space:nowrap}
+#mtxBox table.mtx th{color:#8b9ab1;font-weight:600;text-align:left;padding:3px 5px;border-bottom:1px solid var(--line2)}
+#mtxBox table.mtx td{padding:3px 5px;border-bottom:1px solid rgba(35,50,82,.45);color:#cbd5e1}
+#mtxBox table.mtx td.p{color:#e2e8f0;font-weight:600}
+#mtxBox table.mtx .up{color:#f87171}
+#mtxBox table.mtx .down{color:#4ade80}
+#mtxBox table.mtx .warn{color:#fbbf24}
+#mtxBox table.mtx .dim{color:#64748b}
 .sinote{margin:0 0 5px;font-size:12px;line-height:1.58;color:#d1fae5;background:rgba(16,185,129,.12);
   border-left:3px solid #34d399;padding:7px 9px;border-radius:6px;white-space:pre-wrap;font-weight:500}
 .airuletoggle{font-size:10px;color:#7c8aa0;margin:1px 0 5px;cursor:pointer;user-select:none}
@@ -385,6 +394,11 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   <div class="card-title"><b>多周期节奏</b><span class="sp"></span><span id="mpBias" style="font-size:10px"></span></div>
   <div class="hint" id="snapHint" style="display:none"></div>
   <div class="mp" id="mp"></div>
+</div>
+
+<div class="card">
+  <div class="card-title"><b>多周期指标矩阵</b><span class="sp"></span><span id="mtxMeta" style="font-size:10px"></span></div>
+  <div class="sigbox" id="mtxBox"></div>
 </div>
 
 <div class="card">
@@ -3204,6 +3218,65 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       };
     }
 
+    /** RSI（简化 Wilder，末值） */
+    function rsiCalc(closes, n) {
+      const p = n || 14;
+      if (!closes || closes.length < p + 1) return null;
+      let gain = 0, loss = 0;
+      for (let i = closes.length - p; i < closes.length; i++) {
+        const d = closes[i] - closes[i - 1];
+        if (d >= 0) gain += d; else loss -= d;
+      }
+      if (loss === 0) return 100;
+      return 100 - 100 / (1 + gain / loss);
+    }
+    /** BOLL(20,2)：中轨/上轨/下轨与 %B 位置（0=下轨，1=上轨） */
+    function bollCalc(bars, n, k) {
+      const p = n || 20, mult = k || 2;
+      if (!bars || bars.length < p) return null;
+      const closes = bars.map((b) => b.c);
+      const arr = closes.slice(-p);
+      const mid = arr.reduce((a, b) => a + b, 0) / p;
+      const sd = Math.sqrt(arr.reduce((a, b) => a + (b - mid) * (b - mid), 0) / p);
+      const up = mid + mult * sd, low = mid - mult * sd;
+      const last = closes[closes.length - 1];
+      const denom = up - low;
+      return { mid, up, low, sd, last, pos: denom > 0 ? (last - low) / denom : null };
+    }
+    /** OBV：累计量能与近 6 根斜率 */
+    function obvCalc(bars) {
+      if (!bars || bars.length < 3) return null;
+      let obv = 0; const series = [0];
+      for (let i = 1; i < bars.length; i++) {
+        if (bars[i].c > bars[i - 1].c) obv += bars[i].v || 0;
+        else if (bars[i].c < bars[i - 1].c) obv -= bars[i].v || 0;
+        series.push(obv);
+      }
+      const m = Math.min(6, series.length);
+      const first = series[series.length - m], last = series[series.length - 1];
+      return { obv: last, slope: last - first, trend: last > first ? "up" : last < first ? "down" : "flat", series };
+    }
+    /** 量价背离（简化）：价格创近 8 根新高/新低，但 OBV 未同步 → 顶/底背离 */
+    function volPriceDivergence(bars) {
+      if (!bars || bars.length < 10) return "none";
+      const closes = bars.map((b) => b.c);
+      let obv = 0; const obvArr = [0];
+      for (let i = 1; i < bars.length; i++) {
+        if (closes[i] > closes[i - 1]) obv += bars[i].v || 0;
+        else if (closes[i] < closes[i - 1]) obv -= bars[i].v || 0;
+        obvArr.push(obv);
+      }
+      const n = bars.length;
+      const prevCloses = closes.slice(Math.max(0, n - 9), n - 1);
+      const prevObv = obvArr.slice(Math.max(0, n - 9), n - 1);
+      if (!prevCloses.length || !prevObv.length) return "none";
+      const lastC = closes[n - 1], lastO = obvArr[n - 1];
+      const maxC = Math.max(...prevCloses), minC = Math.min(...prevCloses);
+      const maxO = Math.max(...prevObv), minO = Math.min(...prevObv);
+      if (lastC >= maxC && lastO < maxO) return "top";
+      if (lastC <= minC && lastO > minO) return "bottom";
+      return "none";
+    }
     /** 多周期共振：5 / 15 / 30 / 60 分钟 */
     function multiPeriod(points) {
       const defs = [[5, "5分"], [15, "15分"], [30, "30分"], [60, "60分"]];
@@ -3369,6 +3442,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     parseTencentSnapshot: parseTencentSnapshot, backoffDelay: backoffDelay, decodeText: decodeText,
     suggestQtys: suggestQtys, suggestPlan: suggestPlan,
     macdCalc: macdCalc, kdjCalc: kdjCalc, volumeState: volumeState, regimeOf: regimeOf,
+    rsiCalc: rsiCalc, bollCalc: bollCalc, obvCalc: obvCalc, volPriceDivergence: volPriceDivergence,
     scoreSetup: scoreSetup, ledgerAdd: ledgerAdd, ledgerEval: ledgerEval, ledgerStats: ledgerStats,
     limitPctOf: limitPctOf, limitStateOf: limitStateOf,
     washoutDetect: washoutDetect,
@@ -3408,7 +3482,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.86 · 2026-11-06";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.87 · 2026-11-06";   // 每次发版改这里，家人可在页脚核对
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -3747,7 +3821,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         ? { benchmark: indexData.code, benchmarkChgPct: indexData.pct, relativePct: metrics.changePct - indexData.pct } : null,
       ruleSummary: lastRuleBrief,
       unified: (typeof lastUnified !== "undefined" ? lastUnified : null),
-      tradeStyle: lastUshort ? { type: "超短线 T+1（今天买、明天卖；14:45 后不提示买入）", action: lastUshort.action, conf: lastUshort.conf } : { type: "超短线 T+1（今天买、明天卖；14:45 后不提示买入）" }
+      tradeStyle: lastUshort ? { type: "超短线 T+1（今天买、明天卖；14:45 后不提示买入）", action: lastUshort.action, conf: lastUshort.conf } : { type: "超短线 T+1（今天买、明天卖；14:45 后不提示买入）" },
+      indicatorMatrix: buildIndicatorMatrix(parsed ? parsed.points : [])
     };
   }
   function aiSystemPrompt() {
@@ -3759,6 +3834,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       "持仓时无论 action 是 buy/sell/wait，都必须填写 stop 与 target 两个数字字段（用于系统关键位预警），entryLow/entryHigh 可填减仓参考区间；没有依据也要给出基于 ATR/均线/前低的合理位，并说明依据。\n" +
       "持仓走弱（自日内高点回落≥2.5%、跌破均价、接近止损、浮盈明显回撤）时，要在 reason 明确指出“减仓预警”，并给出反弹减仓位与止损位，不能只写观望。\n" +
       "一致性硬规则：unified.buy 为 false 时，entry 字段必须写“不建议建仓”，pricePlan 不得给买入建议，ultraShort.action 必须 wait；任何卡片之间不得出现“一边说买、一边说不交易”，若发现数据间矛盾，以 unified 为准并在理由中说明。\n" +
+      "指标矩阵硬要求：输入里的 indicatorMatrix 是 5/15/30/60 分钟的 MACD/KDJ/RSI14/BOLL(20,2)位置/量能状态/OBV/量价背离矩阵。你必须逐周期读它：①指出多周期共振或背离 ②指出 RSI 超买/超卖、BOLL 上轨/下轨位置 ③指出 OBV 与价格是否背离 ④再结合 unified 给 ultraShort；不得只引用评分，若有指标与规则冲突要明确说明取舍。\n" +
       "买入措辞规范：本条数据中若 unified.buy=false，正文里不要出现“建议买入/可以建仓/小仓试”等正向买入措辞，只能写“观察/等待/不建议”；否则系统弹窗会误判。\n" +
       "只输出一个 JSON 对象（不要 markdown 代码块、不要多余文字），键如下，每个值是 60~140 字中文：\n" +
       '{"brief":"总体结论：当前适合持股/减仓/清仓/观望/建仓 + 核心理由 + 具体动作（有持仓则给股数）",' +
@@ -3994,6 +4070,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     try { if (metrics) render(metrics, parsed ? parsed.points : []); } catch (e) {}
     try { renderMultiCard(); } catch (e) {}
     try { renderSignalCard(); } catch (e) {}
+    try { renderMatrixCard(); } catch (e) {}
     try { renderBurstCard(); } catch (e) {}
     try { renderEntryCard(); } catch (e) {}
     try { renderEntryTrackCard(); } catch (e) {}
@@ -6021,6 +6098,95 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       })
       .catch(function () { /* 多股行情失败不影响主功能 */ });
   }
+  var lastMatrix = null;
+  /** 5/15/30/60 分钟指标矩阵（展示与喂 AI 用，暂不参与评分） */
+  function buildIndicatorMatrix(points) {
+    try {
+      var defs = [[5, "5分"], [15, "15分"], [30, "30分"], [60, "60分"]];
+      var out = {};
+      for (var i = 0; i < defs.length; i++) {
+        var mm = defs[i][0], label = defs[i][1];
+        var bars = C.buildBars(points || [], mm);
+        if (!bars || bars.length < 5) { out[mm] = { label: label, ok: false }; continue; }
+        var closes = bars.map(function (b) { return b.c; });
+        var ps = C.periodStats(bars, label, mm) || null;
+        var macd = C.macdCalc(closes), kdj = C.kdjCalc(bars), vs = C.volumeState(bars);
+        out[mm] = {
+          label: label, ok: true, bars: bars.length,
+          ps: ps, macd: macd, kdj: kdj, vol: vs,
+          rsi: C.rsiCalc(closes, 14),
+          boll: C.bollCalc(bars, 20, 2),
+          obv: C.obvCalc(bars),
+          div: C.volPriceDivergence(bars)
+        };
+      }
+      return out;
+    } catch (e) { return null; }
+  }
+  function mtxVolText(vs) {
+    return { breakout: "放量突破", shrinkNewHigh: "缩量新高", stallHighVol: "放量滞涨",
+      healthyPullback: "缩量回调", normal: "正常", "": "正常" }[vs || ""] || (vs || "--");
+  }
+  function renderMatrixCard() {
+    var box = $("mtxBox"), meta = $("mtxMeta");
+    if (!box) return;
+    var pts = allPointsNow();
+    var mtx = buildIndicatorMatrix(pts);
+    lastMatrix = mtx;
+    if (meta) meta.textContent = "5/15/30/60 分 · 展示/供 AI 参考（暂不改评分）";
+    if (!mtx) { box.innerHTML = '<div class="sigwhy">指标矩阵加载中…</div>'; return; }
+    var rows = [[5, "5分"], [15, "15分"], [30, "30分"], [60, "60分"]];
+    var html = '<div class="mtxwrap"><table class="mtx"><thead><tr><th>周期</th><th>趋势</th><th>MACD</th><th>KDJ</th><th>RSI</th><th>BOLL</th><th>量能</th><th>OBV</th><th>背离</th></tr></thead><tbody>';
+    for (var i = 0; i < rows.length; i++) {
+      var mm = rows[i][0], lab = rows[i][1], x = mtx[mm];
+      if (!x || !x.ok) { html += '<tr><td class="p">' + lab + '</td><td colspan="8" class="dim">数据不足</td></tr>'; continue; }
+      var ps = x.ps;
+      var trendCls = ps && ps.trend === "up" ? "up" : ps && ps.trend === "down" ? "down" : "dim";
+      var trendTxt = ps ? ps.trendText : "--";
+      var macdTxt = "--", macdCls = "dim";
+      if (x.macd) {
+        macdTxt = x.macd.cross === "gold" ? "金叉" : x.macd.cross === "dead" ? "死叉" : (x.macd.bull ? "多头" : "空头");
+        if (x.macd.divergence === "top") macdTxt += "·顶背离";
+        else if (x.macd.divergence === "bottom") macdTxt += "·底背离";
+        macdCls = x.macd.bull ? "up" : "down";
+      }
+      var kdjTxt = "--", kdjCls = "dim";
+      if (x.kdj) {
+        kdjTxt = x.kdj.cross === "gold" ? "金叉" : x.kdj.cross === "dead" ? "死叉" : (x.kdj.k > x.kdj.d ? "偏多" : "偏空");
+        if (x.kdj.zone === "over") kdjTxt += "·超买";
+        else if (x.kdj.zone === "under") kdjTxt += "·超卖";
+        kdjCls = x.kdj.cross === "gold" ? "up" : x.kdj.cross === "dead" ? "down" : (x.kdj.zone === "over" ? "warn" : x.kdj.zone === "under" ? "warn" : "dim");
+      }
+      var rsiTxt = "--", rsiCls = "dim";
+      if (x.rsi != null) {
+        rsiTxt = x.rsi.toFixed(0);
+        rsiCls = x.rsi >= 70 ? "warn" : x.rsi <= 30 ? "warn" : x.rsi >= 50 ? "up" : "down";
+        if (x.rsi >= 70) rsiTxt += " 超买"; else if (x.rsi <= 30) rsiTxt += " 超卖";
+      }
+      var bollTxt = "--", bollCls = "dim";
+      if (x.boll && x.boll.pos != null) {
+        bollTxt = (x.boll.pos * 100).toFixed(0) + "%";
+        bollCls = x.boll.pos > 1 ? "warn" : x.boll.pos < 0 ? "warn" : x.boll.pos > 0.5 ? "up" : "down";
+        if (x.boll.pos > 1) bollTxt += " 上轨外"; else if (x.boll.pos < 0) bollTxt += " 下轨外";
+      }
+      var obvTxt = "--", obvCls = "dim";
+      if (x.obv) { obvTxt = x.obv.trend === "up" ? "上升" : x.obv.trend === "down" ? "下降" : "走平"; obvCls = x.obv.trend === "up" ? "up" : x.obv.trend === "down" ? "down" : "dim"; }
+      var divTxt = x.div === "top" ? "顶背离" : x.div === "bottom" ? "底背离" : "无";
+      var divCls = x.div === "top" ? "down" : x.div === "bottom" ? "up" : "dim";
+      html += '<tr><td class="p">' + lab + '</td>' +
+        '<td class="' + trendCls + '">' + trendTxt + "</td>" +
+        '<td class="' + macdCls + '">' + macdTxt + "</td>" +
+        '<td class="' + kdjCls + '">' + kdjTxt + "</td>" +
+        '<td class="' + rsiCls + '">' + rsiTxt + "</td>" +
+        '<td class="' + bollCls + '">' + bollTxt + "</td>" +
+        '<td class="' + (x.vol === "breakout" ? "up" : x.vol === "stallHighVol" || x.vol === "shrinkNewHigh" ? "warn" : "dim") + '">' + mtxVolText(x.vol) + "</td>" +
+        '<td class="' + obvCls + '">' + obvTxt + "</td>" +
+        '<td class="' + divCls + '">' + divTxt + "</td></tr>";
+    }
+    html += "</tbody></table></div>";
+    html += '<div class="sigwhy">说明：RSI14 超买>70 / 超卖<30；BOLL(20,2) 显示 %B 位置（0=下轨，100%=上轨）；OBV 为近 6 根斜率；背离=价格创近 8 根新高/新低但 OBV 未同步。本表仅展示、并作为 AI 输入，暂不参与评分（下一步回测后校准）。</div>';
+    box.innerHTML = html;
+  }
   function renderMultiCard() {
     var card = $("multiCard"), box = $("multiBox"), meta = $("multiMeta");
     if (!card || !box) return;
@@ -6902,6 +7068,7 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         var _freezeIntraday = _closedNow && closedRenderedKey === _frozenKey;
         if (!_freezeIntraday) {
           try { renderSignalCard(); } catch (e) { /* 指标不足时不阻塞行情 */ }
+          try { renderMatrixCard(); } catch (e) { /* 指标矩阵失败不阻塞 */ }
           try { renderBurstCard(); } catch (e) { /* 敏捷信号失败不阻塞 */ }
           try { renderEntryCard(); } catch (e) { /* 建仓建议失败不阻塞 */ }
           try { renderEntryTrackCard(); } catch (e) { /* 验证卡失败不阻塞 */ }
