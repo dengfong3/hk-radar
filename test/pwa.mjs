@@ -1870,7 +1870,7 @@ ok("卖出冷却20分钟", html.includes("us.action === \"buy\" ? 10 * 60 * 1000
 
 /* ---------- 86) AI 对照统计（v0.92） ---------- */
 console.log("\n[AI 对照统计]");
-ok("AI 对照卡片", html.includes('id="aiLogBox"') && html.includes("AI 对照统计") && html.includes("AI 建议 vs 次日实际"));
+ok("AI 对照卡片", html.includes('id="aiLogBox"') && html.includes("AI 对照统计") && html.includes("全市场累计"));
 ok("AI 对照函数", html.includes("function aiLogRecord") && html.includes("function aiLogEvalPending") && html.includes("function aiLogStats") && html.includes("function renderAILogCard"));
 ok("AI 记录本地存储", html.includes("save({ aiLog: st.aiLog })") && html.includes("aiEvalOne"));
 ok("AI 成功后记录", html.includes("st.aiUltra = aiUltraParse(res.cards)") && html.includes("aiLogRecord()"));
@@ -1881,6 +1881,14 @@ console.log("\n[AI vs 规则冲突]");
 ok("冲突统计函数", html.includes("function aiConflictStats"));
 ok("四类冲突", html.includes("AI 买 / 规则不买") && html.includes("规则买 / AI 不买") && html.includes("AI 卖 / 规则不卖") && html.includes("规则卖 / AI 不卖"));
 ok("AI/规则胜负计数", html.includes("AI 对 ") && html.includes("规则对 ") && html.includes("冲突合计"));
+
+
+/* ---------- 88) A/B/C/D 修正（v0.94） ---------- */
+console.log("\n[观察台账修正]");
+ok("全市场筛选按钮", html.includes('id="mlFilterAll"') && html.includes('id="mlFilterCur"') && html.includes('id="aiFilterAll"') && html.includes('id="aiFilterCur"'));
+ok("每股票每天限2条", html.includes("上午/下午各最多 1 条") && html.includes("same.length >= 2"));
+ok("AI切换3分钟冷却", html.includes("切换股票：3 分钟全局冷却") && html.includes("aiGlobalAt"));
+ok("来源标记", html.includes("切换触发") && html.includes("手动") && html.includes("事件触发"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
