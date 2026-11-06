@@ -1898,5 +1898,12 @@ ok("小结函数", html.includes("function obsData") && html.includes("function 
 ok("小结触发条件", html.includes("d.days >= 7") && html.includes("d.mlEv.length >= 30") && html.includes("d.aiEv.length >= 20"));
 ok("小结本地存储", html.includes("save({ obsSummary: st.obsSummary })") && html.includes("复制小结"));
 
+
+/* ---------- 90) ML v3 研究 / AI 数据锚定（v0.96） ---------- */
+console.log("\n[AI 数据锚定]");
+ok("AI 上下文含 ML 概率", html.includes("ml.probPct") && html.includes("mlBaseRates"));
+ok("AI 提示词 ML 约束", html.includes("ML 参考硬要求") && html.includes("不得据此单独给 buy/sell"));
+ok("ML 卡片历史分档", html.includes("历史分档参考（测试集）") && html.includes("≥60 分约 61.0%"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
