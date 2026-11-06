@@ -1860,5 +1860,12 @@ ok("记录/评估函数", html.includes("function mlRecord") && html.includes("f
 ok("本地存储与评估", html.includes("save({ mlLog: st.mlLog })") && html.includes("fetchDaily(code)") && html.includes("次日"));
 ok("卡片调用记录", html.includes("mlRecord(us, _mlc.pct)"));
 
+
+/* ---------- 85) 卖出弹窗防刷（v0.91） ---------- */
+console.log("\n[卖出弹窗防刷]");
+ok("卖出防刷变量", html.includes("lastSellAlertAt") && html.includes("lastSellLow"));
+ok("20分钟/新低才重弹", html.includes("_px >= lastSellLow * 0.995") && html.includes("20 * 60 * 1000"));
+ok("卖出冷却20分钟", html.includes("us.action === \"buy\" ? 10 * 60 * 1000 : 20 * 60 * 1000"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
