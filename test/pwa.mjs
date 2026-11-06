@@ -1890,5 +1890,13 @@ ok("每股票每天限2条", html.includes("上午/下午各最多 1 条") && ht
 ok("AI切换3分钟冷却", html.includes("切换股票：3 分钟全局冷却") && html.includes("aiGlobalAt"));
 ok("来源标记", html.includes("切换触发") && html.includes("手动") && html.includes("事件触发"));
 
+
+/* ---------- 89) 观察期小结（v0.95） ---------- */
+console.log("\n[观察期小结]");
+ok("观察期小结卡片", html.includes('id="obsBox"') && html.includes("观察期小结") && html.includes("自动生成 · 不调用 AI"));
+ok("小结函数", html.includes("function obsData") && html.includes("function obsBuildSummary") && html.includes("function obsGenerate") && html.includes("function maybeAutoObsSummary"));
+ok("小结触发条件", html.includes("d.days >= 7") && html.includes("d.mlEv.length >= 30") && html.includes("d.aiEv.length >= 20"));
+ok("小结本地存储", html.includes("save({ obsSummary: st.obsSummary })") && html.includes("复制小结"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
