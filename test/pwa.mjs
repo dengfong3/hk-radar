@@ -1670,7 +1670,7 @@ ok("事件触发逻辑覆盖价格/均价/量能/信号/洗盘/档位/大盘/异
     .every(function (k) { return html.indexOf(k) >= 0; }));
 ok("仅交易时段 + 最短间隔", html.includes("marketPhase(new Date(), st.code) !== \"open\"") && html.includes("aiMinGapMs"));
 ok("页面不可见时不调用", html.includes("document.hidden"));
-ok("AI 结论变化弹窗提示", html.includes("notifyAIAction") && html.includes("AI 实时提示"));
+ok("AI 文本不再直接弹交易窗", html.includes("notifyAIAction") && html.includes("AI 文本不再直接产生任何交易弹窗"));
 ok("默认15分钟自动（实时需主动勾选）", html.includes("st.aiRealtime !== true") && html.includes("maybeAIBrief()") && html.includes("rt.checked = st.aiRealtime === true"));
 
 
@@ -1741,7 +1741,7 @@ ok("规则+AI 合并为统一信号", html.includes("function ushortSignal") && 
 ok("AI 输出 ultraShort 字段", html.includes('"ultraShort"') && html.includes("nextDayPlan") && html.includes("confidence"));
 ok("T+1 时间闸门", html.includes("14:45 后不提示买入") && html.includes("14 * 60 + 45"));
 ok("超短线弹窗及时提示", html.includes("function maybeUshortAlert") && html.includes("超短线买入信号（T+1）"));
-ok("旧买点弹窗停用、异动只保留卖点", html.includes("买点弹窗统一由「超短线信号」触发") && html.includes('_gate.level !== "buy"'));
+ok("旧买点弹窗停用、异动卖点需持仓", html.includes("卖点弹窗必须有持仓") && html.includes('_gate.level !== "buy" && curPos().shares > 0'));
 ok("无 Key 时规则版超短线可用", html.includes("规则版（未配置 AI）") && html.includes("规则买点（无 AI 确认）"));
 
 
@@ -1760,8 +1760,8 @@ console.log("\n[建仓建议统一]");
 ok("建仓建议不再单独弹窗", html.includes("建仓建议不再单独弹窗") && !html.includes("建仓建议（\" + (ea.suitable"));
 ok("建仓卡在统一结论否决时标注", html.includes("本卡区间仅作观察，不执行") && html.includes("买点弹窗统一由「⚡ 超短线信号」触发"));
 ok("建仓卡 meta 同步统一结论", html.includes("不建议建仓（统一结论：不交易）"));
-ok("AI 买入弹窗须服从统一结论", html.includes("if (level === \"buy\")") && html.includes("if (!_uAI || !_uAI.buy)"));
-ok("“不建议建仓”不会被误判为买入", html.includes("不建议|不宜|不可|避免|别追|不要买"));
+ok("AI 方向只用于展示不再弹窗", html.includes("st.lastAIAction = us.action") && html.includes("只记录 AI 方向供卡片展示"));
+ok("空仓不会因 AI 文字弹卖出点", html.includes("空仓却弹出“卖出点”") && !html.includes("AI 实时提示（"));
 ok("AI 正文买入措辞受约束", html.includes("正文里不要出现“建议买入/可以建仓/小仓试”"));
 
 
@@ -1780,7 +1780,7 @@ ok("AI 持仓必须给卖点", html.includes("若输入有持仓") && html.inclu
 console.log("\n[收盘后与定时补生成]");
 ok("交易时段判定", html.includes("function isTradingNow") && html.includes("function isMarketClosedNow"));
 ok("收盘后不再自动调用 AI", html.includes("if (!isTradingNow()) return;   // 收盘后不再自动调用 AI") && html.includes("// 收盘后不自动分析"));
-ok("收盘后不弹交易提示", html.includes("收盘后不弹交易提示"));
+ok("收盘后不弹交易提示", html.includes('st.lastAIAction = "info";') && html.includes("收盘后不再弹交易提示"));
 ok("收盘后冻结盘中卡片", html.includes("closedRenderedKey") && html.includes("_freezeIntraday") && html.includes("收盘快照"));
 ok("超短线卡显示收盘暂停提示", html.includes("已收盘：盘中信号与 AI 自动分析已暂停"));
 ok("定时简报可当天补生成", html.includes("catchUntil") && html.includes("等待自动补生成") && html.includes("（补生成）"));
