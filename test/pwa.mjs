@@ -1852,5 +1852,13 @@ ok("ML 复算函数", html.includes("function mlBuildFeatures") && html.includes
 ok("卡片显示 ML 分", html.includes("ML 次日胜率参考") && html.includes("辅助参考，不构成交易信号"));
 ok("弹窗带 ML 分", html.includes("ML次日胜率参考"));
 
+
+/* ---------- 84) ML 观察记录（v0.90） ---------- */
+console.log("\n[ML 观察记录]");
+ok("ML 观察卡片", html.includes('id="mlLogBox"') && html.includes("ML 观察记录") && html.includes("ML 分档"));
+ok("记录/评估函数", html.includes("function mlRecord") && html.includes("function mlEvalPending") && html.includes("function mlLogStats") && html.includes("function renderMLLogCard"));
+ok("本地存储与评估", html.includes("save({ mlLog: st.mlLog })") && html.includes("fetchDaily(code)") && html.includes("次日"));
+ok("卡片调用记录", html.includes("mlRecord(us, _mlc.pct)"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
