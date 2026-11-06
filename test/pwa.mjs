@@ -1787,5 +1787,15 @@ ok("定时简报可当天补生成", html.includes("catchUntil") && html.include
 ok("定时简报超时与看护", html.includes("schedPendingAt") && html.includes("生成超时（已自动恢复") && html.includes("withTimeout(fetchSectorCtx"));
 ok("补生成说明", html.includes("错过自动窗口后，当天再次打开会自动补生成"));
 
+
+/* ---------- 80) 持仓冲高回落预警 ---------- */
+console.log("\n[持仓走弱预警]");
+ok("冲高回落预警规则", html.includes("冲高回落：自日内高点") && html.includes("_dd >= 2.5") && html.includes("_vwapDev <= -1.0"));
+ok("明显跌破均价直接卖出", html.includes("明显跌破均价") && html.includes("_vwapDev <= -3.0"));
+ok("接近止损提前预警", html.includes("接近止损 ") && html.includes("/ sellStop * 100 <= 0.6"));
+ok("浮盈回撤预警", html.includes("浮盈自高点回撤") && html.includes("_peakP - _curP >= 2"));
+ok("预警状态与弹窗", html.includes("冲高回落·减仓预警") && html.includes("us.action !== \"warn\"") && html.includes("持仓预警（冲高回落/走弱）"));
+ok("预警为减仓提醒而非清仓", html.includes("反弹到均价 ") && html.includes("减 1/3～1/2"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
