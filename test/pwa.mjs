@@ -1867,5 +1867,13 @@ ok("卖出防刷变量", html.includes("lastSellAlertAt") && html.includes("last
 ok("20分钟/新低才重弹", html.includes("_px >= lastSellLow * 0.995") && html.includes("20 * 60 * 1000"));
 ok("卖出冷却20分钟", html.includes("us.action === \"buy\" ? 10 * 60 * 1000 : 20 * 60 * 1000"));
 
+
+/* ---------- 86) AI 对照统计（v0.92） ---------- */
+console.log("\n[AI 对照统计]");
+ok("AI 对照卡片", html.includes('id="aiLogBox"') && html.includes("AI 对照统计") && html.includes("AI 建议 vs 次日实际"));
+ok("AI 对照函数", html.includes("function aiLogRecord") && html.includes("function aiLogEvalPending") && html.includes("function aiLogStats") && html.includes("function renderAILogCard"));
+ok("AI 记录本地存储", html.includes("save({ aiLog: st.aiLog })") && html.includes("aiEvalOne"));
+ok("AI 成功后记录", html.includes("st.aiUltra = aiUltraParse(res.cards)") && html.includes("aiLogRecord()"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
