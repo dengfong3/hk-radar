@@ -3482,7 +3482,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
 (function () {
   "use strict";
   var C = window.RADAR_CORE;
-  var APP_VERSION = "v0.87 · 2026-11-06";   // 每次发版改这里，家人可在页脚核对
+  var APP_VERSION = "v0.88 · 2026-11-06";   // 每次发版改这里，家人可在页脚核对
+  /* ML 模型 v1（离线训练导出；前端只做复算，不训练） */
+  var ML_MODEL = {"version":"ml1-2026-11-06","label":"T+1 次日目标+2%/止损-1.5%","features":["dayRet","gap","dayPos","vwapDev","ret30","ret60","volRatio","amp","t5","t15","t30","t60","m5","m15","m30","m60","k5","k15","k30","k60","r5","r15","r30","r60","b5","b15","b30","b60","o5","o15","o30","o60","d5","d15","d30","d60","multi"],"mean":[-0.186505,-0.109034,0.454416,-0.163703,-0.050952,-0.022012,0.906882,4.996732,-0.076686,0.0,0.0,0.0,0.005603,0.0,0.0,0.0,-0.003633,-0.00453,0.0,0.0,0.48912,0.495876,0.5,0.5,0.472945,0.5,0.5,0.5,-0.10785,-0.096427,-0.014612,0.0,-0.01376,-0.008943,0.0,0.0,-0.076686],"std":[4.036719,2.147216,0.308507,1.674722,1.189804,1.403691,1.215499,3.124117,0.68578,1.0,1.0,1.0,0.212029,1.0,1.0,1.0,0.086909,0.050027,1.0,1.0,0.15339,0.094446,1.0,1.0,0.258146,1.0,1.0,1.0,0.983722,0.852876,0.493054,1.0,0.336153,0.217324,1.0,1.0,0.68578],"coef":[-0.061958,0.089778,0.231299,-0.057859,-0.005415,0.015586,-0.003586,-0.14074,-0.01482,0.0,0.0,0.0,-0.013039,0.0,0.0,0.0,-0.103766,-0.003361,0.0,0.0,0.060931,-0.006986,0.0,0.0,-0.013673,0.0,0.0,0.0,-0.000582,-0.053713,-0.047211,0.0,0.012682,0.004938,0.0,0.0,-0.01482],"intercept":-0.006335,"metrics":{"aucTrain":0.561,"aucTest":0.539,"n":129441,"testDates":["2026-10-15","2026-11-04"]}};
+
   var LS = "hk-radar-pwa-v1";
   var $ = function (id) { return document.getElementById(id); };
 
@@ -5087,6 +5090,10 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     }
     h += '<div class="sigwhy"><b>明日卖出计划：</b>' + escHtml(us.nextDayPlan) + "</div>";
     if (us.reasons && us.reasons.length) h += '<div class="sigwhy">依据：' + escHtml(us.reasons.join(" · ")) + "</div>";
+    try {
+      var _mlc = mlProb(allPointsNow());
+      if (_mlc) h += '<div class="sigwhy">ML 次日胜率参考 <b>' + _mlc.pct + "%</b>（模型 " + ML_MODEL.version + " · 辅助参考，不构成交易信号）</div>";
+    } catch (e) {}
     if (us.conflicts && us.conflicts.length) h += '<div class="sigveto">' + escHtml(us.conflicts[0]) + "</div>";
     h += '<div class="tradebar"><button class="btn" id="usAiBtn">' + (hasAIKey() ? "立即 AI 分析" : "配置 AI") +
       '</button><button class="btn" id="usMuteBtn">静音 30 分钟</button></div>';
@@ -5123,16 +5130,18 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
       if (lastUshortAlertKey === id) return;
       lastUshortAlertKey = id;
       var txt;
+      var _mlTxt = "";
+      try { var _ml2 = mlProb(allPointsNow()); if (_ml2) _mlTxt = " · ML次日胜率参考 " + _ml2.pct + "%"; } catch (e) {}
       if (us.action === "buy") {
         txt = "⚡ 超短线买入信号（T+1）：买点 " + (us.entryLo != null ? fmtP(us.entryLo) + "–" + fmtP(us.entryHi) : "现价") +
           " · 止损 " + fmtP(us.stop) + " · 目标 " + fmtP(us.target) + " · 明日卖出计划：" + us.nextDayPlan +
-          "（已统一：智能信号 / 盘中异动 / 建仓建议 / AI 结论；非预测，T+1）";
+          "（已统一：智能信号 / 盘中异动 / 建仓建议 / AI 结论" + _mlTxt + "；非预测，T+1）";
       } else {
         txt = "⚡ 超短线卖出信号（T+1）：" + (us.reasons[0] || "统一信号转空") +
           " · 止盈 " + fmtP(us.sellTake) + " / 止损 " + fmtP(us.sellStop) + " / 均价 " + fmtP(us.vwap) +
           (us.aiStop != null ? " / AI止损 " + fmtP(us.aiStop) : "") +
           (us.aiTarget != null ? " / AI目标 " + fmtP(us.aiTarget) : "") +
-          " · 明日卖出计划：" + us.nextDayPlan + "（已统一：规则+AI+持仓，非预测）";
+          " · 明日卖出计划：" + us.nextDayPlan + "（已统一：规则+AI+持仓" + _mlTxt + "，非预测）";
       }
       alertOnce(id, us.action === "buy" ? "buy" : "sell", txt, metrics ? metrics.price : null, 10 * 60 * 1000);
     } catch (e) { /* 弹窗失败不影响 */ }
@@ -5790,6 +5799,64 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         })
         .catch(function () {});
     });
+  }
+
+  /** ML 模型 v1：从前端可见的指标矩阵复算「次日胜率参考」；仅辅助，不单独构成交易信号 */
+  function mlBuildFeatures(pts) {
+    try {
+      if (!metrics || !(metrics.price > 0)) return null;
+      var bars = C.buildBars(pts || [], 5);
+      if (!bars || bars.length < 3) return null;
+      var price = metrics.price, n = bars.length;
+      function retK(k) { return n > k ? (price / bars[n - 1 - k].c - 1) * 100 : 0; }
+      var volRatio = 1;
+      if (n >= 6) {
+        var recent = bars.slice(-3), base = bars.slice(Math.max(0, n - 15), n - 3);
+        var rv = 0, bv = 0;
+        for (var i = 0; i < recent.length; i++) rv += recent[i].v || 0;
+        for (var j = 0; j < base.length; j++) bv += base[j].v || 0;
+        if (base.length && rv > 0) volRatio = (rv / recent.length) / (bv / base.length || 1);
+      }
+      var high = metrics.high > 0 ? metrics.high : price, low = metrics.low > 0 ? metrics.low : price;
+      var baseF = [
+        metrics.changePct || 0,
+        metrics.open > 0 && metrics.prevClose > 0 ? (metrics.open / metrics.prevClose - 1) * 100 : 0,
+        high > low ? (price - low) / (high - low) : 0.5,
+        metrics.vwapDevPct || 0,
+        retK(6), retK(12), volRatio,
+        high > low ? (high - low) / price * 100 : 0
+      ];
+      var matrix = lastMatrix || buildIndicatorMatrix(pts || []);
+      var tA = [], mA = [], kA = [], rA = [], bA = [], oA = [], dA = [];
+      [5, 15, 30, 60].forEach(function (mm) {
+        var x = matrix && matrix[mm], t = 0, mh = 0, kd = 0, rs = 0.5, bb = 0.5, ob = 0, dv = 0;
+        if (x && x.ok) {
+          if (x.ps) t = x.ps.trend === "up" ? 1 : x.ps.trend === "down" ? -1 : 0;
+          if (x.macd) mh = (x.macd.hist || 0) / price * 100;
+          if (x.kdj) kd = (x.kdj.k - x.kdj.d) / 100;
+          if (x.rsi != null) rs = x.rsi / 100;
+          if (x.boll && x.boll.pos != null) bb = x.boll.pos;
+          if (x.obv) ob = x.obv.trend === "up" ? 1 : x.obv.trend === "down" ? -1 : 0;
+          if (x.div === "top") dv = 1; else if (x.div === "bottom") dv = -1;
+        }
+        tA.push(t); mA.push(mh); kA.push(kd); rA.push(rs); bA.push(bb); oA.push(ob); dA.push(dv);
+      });
+      var multi = tA.reduce(function (a, b) { return a + b; }, 0);
+      return baseF.concat(tA, mA, kA, rA, bA, oA, dA, [multi]);
+    } catch (e) { return null; }
+  }
+  function mlProb(pts) {
+    try {
+      var f = mlBuildFeatures(pts);
+      if (!f || f.length !== ML_MODEL.features.length) return null;
+      var z = ML_MODEL.intercept;
+      for (var i = 0; i < f.length; i++) {
+        var sd = ML_MODEL.std[i] || 1;
+        z += ML_MODEL.coef[i] * ((f[i] - ML_MODEL.mean[i]) / sd);
+      }
+      var p = 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
+      return { p: p, pct: Math.round(p * 100) };
+    } catch (e) { return null; }
   }
 
   function renderSignalCard() {

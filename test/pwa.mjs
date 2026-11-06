@@ -1836,5 +1836,21 @@ ok("指标矩阵卡片", html.includes('id="mtxBox"') && html.includes("多周�
 ok("矩阵渲染函数", html.includes("function buildIndicatorMatrix") && html.includes("function renderMatrixCard") && html.includes("C.rsiCalc"));
 ok("AI 输入指标矩阵", html.includes("indicatorMatrix: buildIndicatorMatrix") && html.includes("指标矩阵硬要求"));
 
+
+/* ---------- 83) ML 辅助分（v0.88） ---------- */
+console.log("\n[ML 辅助分]");
+ok("嵌入 ML 模型", html.includes("var ML_MODEL =") && html.includes("ml1-2026-11-06") && html.includes("\"coef\""));
+ok("ML 特征数量一致", (function () {
+  const m = html.match(/var ML_MODEL = (\{.*?\});/s);
+  if (!m) return false;
+  try {
+    const o = JSON.parse(m[1]);
+    const n = o.features.length; return n === o.coef.length && n === o.mean.length && n === o.std.length && n === 37;
+  } catch (e) { return false; }
+})());
+ok("ML 复算函数", html.includes("function mlBuildFeatures") && html.includes("function mlProb") && html.includes("ML_MODEL.intercept"));
+ok("卡片显示 ML 分", html.includes("ML 次日胜率参考") && html.includes("辅助参考，不构成交易信号"));
+ok("弹窗带 ML 分", html.includes("ML次日胜率参考"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
