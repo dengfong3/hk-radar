@@ -1590,6 +1590,7 @@ ok("默认模型 deepseek-flash（V4.1-Flash）", html.includes('placeholder="de
 ok("旧模型名自动规范化", html.includes("function aiNormalizeModel") && html.includes('low === "deepseek-v4.1-flash"') && html.includes('return "deepseek-flash"'));
 ok("AI 状态显示实际模型/降级原因", html.includes("aiModelText(res)") && html.includes("降级自") && html.includes("aiFallbackReason"));
 ok("AI 模型配置即时保存", html.includes('m.addEventListener("input"') && html.includes("aiModelSetting()"));
+ok("deepseek-flash 关闭思考模式", (html.match(/thinking: \{ type: "disabled" \}/g) || []).length >= 3 && html.includes("只返回思考内容"));
 ok("提示词要求板块/大盘/风险", html.includes("aiSystemPrompt") && html.includes("所属板块") && html.includes("大盘环境") && html.includes("风险提示"));
 ok("AI 简报自动触发", html.includes("maybeAIBrief") && html.includes("generateAIBrief"));
 ok("上下文含个股/板块/大盘", html.includes("buildAIContext") && html.includes("fetchSectorCtx") && html.includes("fetchMarketCtx"));
