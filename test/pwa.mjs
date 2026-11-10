@@ -1954,5 +1954,14 @@ ok("声音开关不再阻断系统通知", html.includes("if (st.sound) { beep(s
 ok("后台不自动调用 AI 持仓事件", html.includes("最小化/后台时保留规则提醒"));
 ok("SW 缓存升级到 v2", swSrc.includes("hk-radar-shell-v2"));
 
+/* ---------- 92) 通知提示只弹一次 / 多标签共享（v1.01） ---------- */
+console.log("\n[通知提示去重]");
+ok("通知提示持久化键", html.includes("hk-radar-notify-dismissed") && html.includes("setNotifyHintClosed"));
+ok("通知提示跨标签共享", html.includes('addEventListener("storage"') && html.includes("NOTIFY_HINT_KEY"));
+ok("通知权限变化监听", html.includes("navigator.permissions.query") && html.includes("addEventListener(\"change\""));
+ok("顶栏通知兜底按钮", html.includes('id="btnNotify"') && html.includes("onNotifyButton"));
+ok("授权后发测试通知", html.includes("function notifyTest") && html.includes("桌面通知已开启"));
+ok("已关闭提示不再自动弹", html.includes("notifyHintSeenRecently") && html.includes("10 * 60 * 1000"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
