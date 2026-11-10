@@ -1,7 +1,8 @@
 /* 盯盘雷达 PWA 的 service worker：
-   只缓存应用外壳（HTML/manifest/图标），行情接口一律直连、不缓存。
-   注意：本 SW 不做 Web Push —— 无后端的版本无法在 App 关闭后推送。 */
-const CACHE = "hk-radar-shell-v1";
+   缓存应用外壳（HTML/manifest/图标），行情接口一律直连、不缓存。
+   支持页面在最小化/后台时用 showNotification 弹 Windows 系统通知，点击通知可拉回 PWA。
+   注意：本 SW 不做 Web Push —— 浏览器完全退出（进程结束）后纯网页版本无法推送。 */
+const CACHE = "hk-radar-shell-v2";
 const SHELL = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -19,6 +20,28 @@ self.addEventListener("activate", (event) => {
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+// 点击桌面通知：优先聚焦已打开的 PWA 窗口，没有则新开
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const target = data.url || "./";
+  event.waitUntil((async () => {
+    const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of list) {
+      if ("focus" in c) {
+        await c.focus();
+        if (c.navigate && target) {
+          try { await c.navigate(target); } catch (e) {}
+        }
+        return;
+      }
+    }
+    if (self.clients.openWindow) {
+      try { await self.clients.openWindow(target); } catch (e) {}
+    }
+  })());
 });
 
 self.addEventListener("fetch", (event) => {

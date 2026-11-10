@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
 const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+const swSrc = fs.readFileSync(path.join(ROOT, "sw.js"), "utf8");
 
 let pass = 0, fail = 0;
 const ok = (n, c, extra) => { c ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n}${extra !== undefined ? "  -> " + JSON.stringify(extra) : ""}`)); };
@@ -1941,6 +1942,17 @@ console.log("\n[AI 数据锚定]");
 ok("AI 上下文含 ML 概率", html.includes("ml.probPct") && html.includes("mlBaseRates"));
 ok("AI 提示词 ML 约束", html.includes("ML 参考硬要求") && html.includes("不得据此单独给 buy/sell"));
 ok("ML 卡片历史分档", html.includes("历史分档参考（测试集）") && html.includes("≥60 分约 61.0%"));
+
+/* ---------- 91) 最小化/后台提醒（v1.00） ---------- */
+console.log("\n[后台提醒]");
+ok("后台轮询间隔常量", html.includes("var BG_POLL_MS = 30000") && html.includes("delay = Math.max(delay, BG_POLL_MS)"));
+ok("最小化不再清空轮询", !html.includes("if (document.hidden) { clearTimeout(timer); timer = 0; }") && html.includes("setTimeout(function () { tick(false); }, BG_POLL_MS)"));
+ok("通知授权提示", html.includes('id="notifyHint"') && html.includes("askNotifyPermission") && html.includes("Notification.requestPermission"));
+ok("Service Worker 系统通知", html.includes("reg.showNotification") && html.includes("requireInteraction"));
+ok("通知点击拉回 PWA", swSrc.includes("notificationclick") && swSrc.includes("clients.openWindow"));
+ok("声音开关不再阻断系统通知", html.includes("if (st.sound) { beep(sig.level); vibrate(sig.level); }") && html.includes("notify(sig);"));
+ok("后台不自动调用 AI 持仓事件", html.includes("最小化/后台时保留规则提醒"));
+ok("SW 缓存升级到 v2", swSrc.includes("hk-radar-shell-v2"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
