@@ -1488,6 +1488,39 @@ ok("多股监控显示自选名称", multiTxt.indexOf("中际旭创") >= 0 && mu
 ok("多股监控显示代码与涨跌占位", multiTxt.indexOf("300308") >= 0 && multiTxt.indexOf("--") >= 0, multiTxt.slice(0, 240));
 
 
+/* ---------- 51b) 自选/多股监控支持 20 只 ---------- */
+console.log("\n[自选20只上限]");
+ok("自选上限常量提升到20", html.includes("var WATCH_MAX = 20") && html.includes("st.watch.length > WATCH_MAX"));
+ok("多股行情与渲染都使用上限常量", (uiSrc.match(/slice\(0, WATCH_MAX\)/g) || []).length >= 2, (uiSrc.match(/slice\(0, WATCH_MAX\)/g) || []).length);
+const codes20 = [
+  "sh600519", "sz300750", "sz300607", "sz300620", "sz300308",
+  "sz300502", "sz002594", "sz300274", "sh688082", "sh688018",
+  "sh603893", "sz301209", "sz300458", "sz301080", "sh688222",
+  "sz002460", "sh601318", "sh600036", "sz000001", "sh600030"
+];
+const hWatch20 = makeHarness({
+  code: codes20[0], watch: codes20, sound: false, chartMode: "min",
+  pos: {}, plans: {}, trade: {}, lastFired: {}
+}, () => null, { snapshotOnly: false });
+let threwW20 = null;
+try { hWatch20.run(coreSrc); hWatch20.run(uiSrc); } catch (e) { threwW20 = e; }
+ok("20只自选场景无异常", !threwW20, threwW20 && threwW20.message);
+await new Promise((r) => setTimeout(r, 320));
+const chips20 = hWatch20.deep("chips");
+const multi20 = hWatch20.deep("multiBox");
+const all20 = codes20.every((c) => chips20.indexOf(C.displayCode(c)) >= 0 && multi20.indexOf(C.displayCode(c)) >= 0);
+ok("20只自选全部显示（chips + 多股监控）", all20, { chips: chips20.slice(0, 180), multi: multi20.slice(0, 260) });
+ok("自选计数显示 20/20", hWatch20.deep("watchCount").indexOf("20 / 20") >= 0, hWatch20.deep("watchCount"));
+let threwAdd20 = null;
+try {
+  hWatch20.byId("codeInput").value = "sh600000";
+  hWatch20.byId("btnSwitch").listeners.click[0]();
+} catch (e) { threwAdd20 = e; }
+const saved20 = hWatch20.saved();
+ok("新增第21只后仍只保留20只", !threwAdd20 && Array.isArray(saved20.watch) && saved20.watch.length === 20, saved20.watch && saved20.watch.length);
+ok("新增股票进入自选、最早一只被挤出", saved20.watch && saved20.watch[0] === "sh600000" && !saved20.watch.includes(codes20[19]), saved20.watch && saved20.watch.slice(0, 3));
+
+
 /* ---------- 52) 支持中文名/拼音首字母切换 ---------- */
 console.log("\n[中文名/拼音切换]");
 const sb = C.parseSmartbox('v_hint="sz~300750~\u5b81\u5fb7\u65f6\u4ee3~ndsd~GP-A^hk~03750~\u5b81\u5fb7\u65f6\u4ee3~ndsd~GP"');
