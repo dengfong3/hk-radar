@@ -2035,5 +2035,30 @@ ok("目标已达但强趋势：卡片提示不机械清仓", _smartTxt.includes(
 ok("目标已达但强趋势：不显示卖出信号", !_smartTxt.includes("超短线卖出/减仓"), _smartTxt.slice(0, 200));
 ok("目标已达但强趋势：给出移动止盈", _smartTxt.includes("移动止盈") && _smartTxt.includes("175."), _smartTxt.slice(0, 260));
 
+/* ---------- 96) 板块/热点/大盘进入规则信号（v1.04） ---------- */
+console.log("\n[板块/热点信号集成]");
+ok("板块上下文含行业排名/概念热点/龙头",
+  html.includes("hotConcepts") && html.includes("m:90+t:3") && html.includes("boardRank") &&
+  html.includes("conceptBoards") && html.includes("loadConcepts"));
+ok("板块/热点后台刷新并节流",
+  html.includes("function refreshSectorMarket") && html.includes("refreshSectorMarket(false)") &&
+  html.includes("120000") && html.includes("lastSectorCtx"));
+ok("环境弱时买入信号降级",
+  html.includes("function sectorMarketInfo") && html.includes("板块/热点偏弱") &&
+  html.includes("out.buy = false") && html.includes("sectorVeto"));
+ok("环境强时目标/卖点先看持仓趋势",
+  html.includes("_sectorStrong") && html.includes("_holdStrong") &&
+  html.includes("_targetHit && _holdStrong") && html.includes("_sectorStrong && _p != null && _vwap"));
+ok("AI 必须分析板块/热点并输出 sectorView",
+  html.includes("板块/热点硬要求") && html.includes("sectorView") &&
+  html.includes("热点强但个股不跟，不追") && html.includes("sectorView:"));
+ok("信号卡与弹窗展示板块/热点",
+  html.includes("板块/热点：") && html.includes("us.sectorInfo") &&
+  html.includes("sectorBriefText") && html.includes("_secTxt"));
+ok("大盘均值进入 AI 上下文",
+  html.includes("marketAvg") && html.includes("marketAvg: (function"));
+ok("大盘/板块卡展示热点",
+  html.includes("◆ 板块/热点") && html.includes("sectorBriefText(_sm0)"));
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
