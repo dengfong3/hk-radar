@@ -148,6 +148,17 @@ function aSharePayload() {
     "1130 169.50 120000 2033000000.00", "1430 168.00 170000 2880000000.00", "1530 168.51 190753 3240986819.99"];
   return { code: 0, msg: "", data: { sh603083: { data: { data: rows, date: "20261016" }, qt: { sh603083: QT } } } };
 }
+function smartSellPayload() {
+  const QT = new Array(88).fill("0");
+  Object.assign(QT, { 0: "1", 1: "剑桥科技", 2: "603083" });
+  QT[3] = "175.61"; QT[4] = "176.15"; QT[5] = "175.08"; QT[6] = "98932";
+  QT[30] = "20261111135100"; QT[31] = "-0.54"; QT[32] = "-0.31";
+  QT[33] = "177.70"; QT[34] = "169.24"; QT[37] = "170842"; QT[39] = "138.55";
+  const rows = ["0930 175.08 20000 350160000.00", "1000 172.00 40000 688000000.00",
+    "1130 173.50 60000 1041000000.00", "1430 176.50 80000 1412000000.00",
+    "1530 175.61 98932 1708427035.00"];
+  return { code: 0, msg: "", data: { sh603083: { data: { data: rows, date: "20261111" }, qt: { sh603083: QT } } } };
+}
 function hkPayload() {
   const QT = new Array(78).fill("0");
   Object.assign(QT, { 0: "100", 1: "剑桥科技", 2: "06166" });
@@ -1828,12 +1839,12 @@ ok("补生成说明", html.includes("错过自动窗口后，当天再次打开�
 
 /* ---------- 80) 持仓冲高回落预警 ---------- */
 console.log("\n[持仓走弱预警]");
-ok("冲高回落预警规则", html.includes("冲高回落：自日内高点") && html.includes("_dd >= 2.5") && html.includes("_vwapDev <= -1.0"));
+ok("冲高回落观察规则（收紧+确认）", html.includes("冲高回落：自日内高点") && html.includes("_dd >= 3.0") && html.includes("_vwapDev <= -1.2") && html.includes("warnConfirmed(st.code, _p)"));
 ok("明显跌破均价直接卖出", html.includes("明显跌破均价") && html.includes("_vwapDev <= -3.0"));
 ok("接近止损提前预警", html.includes("接近止损 ") && html.includes("/ sellStop * 100 <= 0.6"));
 ok("浮盈回撤预警", html.includes("浮盈自高点回撤") && html.includes("_peakP - _curP >= 2"));
-ok("预警状态与弹窗", html.includes("冲高回落·减仓预警") && html.includes("us.action !== \"warn\"") && html.includes("持仓预警（冲高回落/走弱）"));
-ok("预警为减仓提醒而非清仓", html.includes("反弹到均价 ") && html.includes("减 1/3～1/2"));
+ok("观察状态与弹窗", html.includes("冲高回落·观察（不追卖）") && html.includes("us.action !== \"warn\"") && html.includes("持仓观察（不是卖点）") && html.includes("warnAlertState"));
+ok("观察不是卖点、不追跌", html.includes("不在急跌中追卖") && html.includes("才减仓") && html.includes("站回均价 "));
 
 
 /* ---------- 81) AI 关键位敏感度 ---------- */
@@ -1981,6 +1992,48 @@ ok("批量快照可解析 bj920725", (() => {
   const q = C.parseBatchSnapshot('v_bj920725="62~惠丰钻石~920725~69.78~65.91~65.62~26254~15350~10903~69.53~2~69.51~2~69.50~16~69.49~36~69.45~10~69.78~27~69.83~3~69.84~15~69.88~6~69.90~8";');
   return q.bj920725 && q.bj920725.price === 69.78 && Math.abs(q.bj920725.chgPct - (69.78 / 65.91 - 1) * 100) < 1e-6;
 })());
+
+/* ---------- 94) 智能止盈 / 观察去重（v1.03） ---------- */
+console.log("\n[智能止盈与观察去重]");
+ok("目标达到后先判断趋势，不机械卖出",
+  html.includes("var _smartTake") && html.includes("var _smartAi") &&
+  html.includes("if (_targetHit && !_smartTake)") && html.includes("if (ai && ai.target != null && _p != null && _p >= ai.target && !_smartAi)"));
+ok("移动止盈使用高点/ATR/VWAP",
+  html.includes("var _trailStop") && html.includes("_atrV * 1.2") &&
+  html.includes("_dayHigh * 0.015") && html.includes("_vwap * 0.995"));
+ok("跌破移动止盈才卖剩余", html.includes("跌破移动止盈 ") && html.includes("移动止盈：跌破 "));
+ok("目标已达只提示一次",
+  html.includes("us.targetReached && us.action !== \"sell\"") &&
+  html.includes(":target:") && html.includes("12 * 60 * 60 * 1000"));
+ok("走弱观察需持续确认",
+  html.includes("function warnConfirmed") && html.includes("45 * 1000") && html.includes("warnConfirmed(st.code, _p)"));
+ok("观察弹窗按新低+30分钟去重",
+  html.includes("warnAlertState") && html.includes("_ws.low * 0.998") && html.includes("30 * 60 * 1000"));
+ok("观察文案明确不追卖", html.includes("持仓观察（不是卖点）") && html.includes("不在急跌中追卖"));
+ok("AI 卖点在强趋势里延后", html.includes("out.aiSellDeferred") && html.includes("AI 建议减仓，但趋势未坏"));
+ok("卡片显示目标已达与移动止盈", html.includes("us.targetReached") && html.includes("已到，但趋势未坏") && html.includes("us.trailStop"));
+
+/* ---------- 95) 行为：目标 172.50 已到、现价 175.61、趋势未坏 → 不机械卖 ---------- */
+console.log("\n[智能止盈行为模拟]");
+const hSmart = makeHarness({
+  code: "sh603083", watch: ["sh603083"], sound: false, chartMode: "min",
+  pos: { sh603083: { shares: 100, cost: 166.18, realized: 0 } },
+  plans: { sh603083: {
+    takes: [{ id: "T1", lo: 172.50, hi: 174, short: "减仓", label: "减仓区" }],
+    reds: [{ id: "R1", at: 161.99, dir: "below", level: "warn", short: "止损", label: "跌破 161.99：止损" }],
+    buys: [], maxShares: 100, lossBudget: 5000, hardStopFloor: null,
+    vwapBand: 1.5, roundTripCostPct: 1.2, levels: [161.99]
+  } },
+  trade: {}, lastFired: {}
+}, (code) => (code === "sh603083" ? smartSellPayload() : null));
+let smartThrew = null;
+try { hSmart.run(coreSrc); hSmart.run(uiSrc); } catch (e) { smartThrew = e; }
+ok("智能止盈场景执行无异常", !smartThrew, smartThrew && smartThrew.message);
+await new Promise((r) => setTimeout(r, 450));
+const _smartTxt = hSmart.deep("usBox");
+ok("目标已达但强趋势：卡片提示不机械清仓", _smartTxt.includes("目标") && _smartTxt.includes("趋势未坏"), _smartTxt.slice(0, 200));
+ok("目标已达但强趋势：不显示卖出信号", !_smartTxt.includes("超短线卖出/减仓"), _smartTxt.slice(0, 200));
+ok("目标已达但强趋势：给出移动止盈", _smartTxt.includes("移动止盈") && _smartTxt.includes("175."), _smartTxt.slice(0, 260));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
