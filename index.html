@@ -3938,7 +3938,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     function loadConcepts(h) {
       return fetchJsonTimeout(boardUrl(h, "m:90+t:3", "f3", "200", "f3,f12,f14,f62"), 8000).then(function (c) {
         var rows = (c && c.data && c.data.diff) || [];
-        out.hotConcepts = rows.slice(0, 8).map(function (x) {
+        var themeNoise = /(昨日|涨停|跌停|融资融券|沪股通|深股通|标普|富时|MSCI|转债|ST板块|次新股|破净|高送转|股权转让|参股|预盈|预亏)/;
+        out.hotConcepts = rows.filter(function (x) { return !themeNoise.test(String(x.f14 || "")); }).slice(0, 8).map(function (x) {
           return { name: x.f14, chgPct: x.f3, mainFlowYi: x.f62 == null ? null : x.f62 / 1e8, code: x.f12 };
         });
         var wanted = out.concepts || [], used = {};

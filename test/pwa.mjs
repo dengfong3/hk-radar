@@ -2059,6 +2059,8 @@ ok("大盘均值进入 AI 上下文",
   html.includes("marketAvg") && html.includes("marketAvg: (function"));
 ok("大盘/板块卡展示热点",
   html.includes("◆ 板块/热点") && html.includes("sectorBriefText(_sm0)"));
+ok("过滤涨停/昨日连板等伪热点",
+  html.includes("themeNoise") && html.includes("昨日|涨停|跌停") && html.includes("hotConcepts = rows.filter"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
