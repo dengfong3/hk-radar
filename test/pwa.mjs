@@ -1721,6 +1721,38 @@ ok("仅交易时段 + 最短间隔", html.includes("marketPhase(new Date(), st.c
 ok("页面不可见时不调用", html.includes("document.hidden"));
 ok("AI 文本不再直接弹交易窗", html.includes("notifyAIAction") && html.includes("AI 文本不再直接产生任何交易弹窗"));
 ok("默认15分钟自动（实时需主动勾选）", html.includes("st.aiRealtime !== true") && html.includes("maybeAIBrief()") && html.includes("rt.checked = st.aiRealtime === true"));
+ok("自动15分钟与实时跟踪互斥", html.includes("if (st.aiAuto) { st.aiRealtime = false;") &&
+  html.includes("if (st.aiRealtime) { st.aiAuto = false;"));
+ok("两个开关都不选时进入纯手动模式", html.includes("手动模式：自动15分钟/实时跟踪都未选") &&
+  html.includes("两个自动开关都关：纯手动"));
+
+console.log("\n[AI 自动/实时二选一行为]");
+(() => {
+  const hAI = makeHarness({
+    code: "sh603083", watch: ["sh603083"], aiAuto: true, aiRealtime: true,
+    sound: false, chartMode: "min", pos: {}, plans: {}, trade: {}, lastFired: {},
+  }, () => null);
+  let threwAI = null;
+  try { hAI.run(coreSrc); hAI.run(uiSrc); } catch (e) { threwAI = e; }
+  const aEl = hAI.byId("aiAuto"), rtEl = hAI.byId("aiRealtime");
+  ok("旧数据两个都勾选时只保留实时跟踪", !threwAI && aEl.checked === false && rtEl.checked === true,
+    { threw: threwAI && threwAI.message, auto: aEl.checked, realtime: rtEl.checked });
+  rtEl.checked = false;
+  try { rtEl.listeners.change[0](); } catch (e) {}
+  const s0 = hAI.saved();
+  ok("两个都取消后是纯手动", s0.aiAuto === false && s0.aiRealtime === false,
+    { auto: s0.aiAuto, realtime: s0.aiRealtime });
+  aEl.checked = true;
+  try { aEl.listeners.change[0](); } catch (e) {}
+  const s1 = hAI.saved();
+  ok("勾选自动15分钟会取消实时跟踪", aEl.checked === true && rtEl.checked === false &&
+    s1.aiAuto === true && s1.aiRealtime === false, { auto: s1.aiAuto, realtime: s1.aiRealtime });
+  rtEl.checked = true;
+  try { rtEl.listeners.change[0](); } catch (e) {}
+  const s2 = hAI.saved();
+  ok("勾选实时跟踪会取消自动15分钟", rtEl.checked === true && aEl.checked === false &&
+    s2.aiRealtime === true && s2.aiAuto === false, { auto: s2.aiAuto, realtime: s2.aiRealtime });
+})();
 
 
 /* ---------- 68) 卡片内手动 AI 按钮 ---------- */
