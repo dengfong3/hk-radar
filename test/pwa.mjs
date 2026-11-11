@@ -1974,6 +1974,9 @@ ok("北交所代码显示 .BJ", C.displayCode("bj920725") === "920725.BJ");
 ok("北交所 secid 0.920725", C.eastmoneySecid("bj920725") === "0.920725");
 ok("北交所涨跌停 30%", C.limitPctOfCode("bj920725") === 0.30);
 ok("北交所每手 100 股", C.lotOf("bj920725") === 100);
+ok("旧 920 自选/当前代码加载时自动迁移",
+  html.includes("st.code = C.normalizeCode(st.code || C.DEFAULT_CODE)") &&
+  html.includes("st.watch.map(function (c) { return C.normalizeCode(c); })"));
 ok("批量快照可解析 bj920725", (() => {
   const q = C.parseBatchSnapshot('v_bj920725="62~惠丰钻石~920725~69.78~65.91~65.62~26254~15350~10903~69.53~2~69.51~2~69.50~16~69.49~36~69.45~10~69.78~27~69.83~3~69.84~15~69.88~6~69.90~8";');
   return q.bj920725 && q.bj920725.price === 69.78 && Math.abs(q.bj920725.chgPct - (69.78 / 65.91 - 1) * 100) < 1e-6;

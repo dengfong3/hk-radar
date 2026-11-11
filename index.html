@@ -3540,9 +3540,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
   }
 
   var st = load();
-  st.code = st.code || C.DEFAULT_CODE;
+  // 旧版本可能把 920725.SH 误存成 sh920725；加载时统一归一化并去重，
+  // 用户不用手动删掉旧自选再重新添加。
+  st.code = C.normalizeCode(st.code || C.DEFAULT_CODE) || C.DEFAULT_CODE;
   st.watch = Array.isArray(st.watch)
-    ? st.watch.filter(function (c, i, a) { return c && a.indexOf(c) === i; })
+    ? st.watch.map(function (c) { return C.normalizeCode(c); })
+        .filter(function (c, i, a) { return c && a.indexOf(c) === i; })
     : [];
   if (!st.watch.length) st.watch = [st.code];
   st.pos = st.pos || {};
