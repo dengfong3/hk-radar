@@ -1725,6 +1725,8 @@ ok("自动15分钟与实时跟踪互斥", html.includes("if (st.aiAuto) { st.aiR
   html.includes("if (st.aiRealtime) { st.aiAuto = false;"));
 ok("两个开关都不选时进入纯手动模式", html.includes("手动模式：自动15分钟/实时跟踪都未选") &&
   html.includes("两个自动开关都关：纯手动"));
+ok("纯手动模式不自动触发持仓事件与定时简报",
+  (html.match(/if \(st\.aiAuto === false && st\.aiRealtime !== true\) return;/g) || []).length >= 2);
 
 console.log("\n[AI 自动/实时二选一行为]");
 (() => {
