@@ -2124,7 +2124,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.09", html.includes('APP_VERSION = "v1.09') && html.includes("v1.09 · 2026-11-12"));
+ok("版本号升到 v1.10", html.includes('APP_VERSION = "v1.10') && html.includes("v1.10 · 2026-11-12"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2148,6 +2148,19 @@ ok("简报数据行标注公告条数与日期",
   html.includes("var annDates = []") && html.includes('"公告 " + extras.announcements.length + " 条"'));
 ok("Prompt 含公告硬规则（不代表涨跌方向/禁止编造/不单独触发买卖）",
   html.includes("公告规则：announcements 仅是事件信息") && html.includes("不代表涨跌方向") && html.includes("公告不得单独触发买卖"));
+
+/* ---------- 99) 公告缓存口径与盘后简报（v1.10） ---------- */
+console.log("\n[公告缓存与盘后简报]");
+ok("公告成功但无有效项返回空数组，不误报数据缺口",
+  html.includes("function annParseItems") && html.includes("return out.slice(0, ANN_MAX);"));
+ok("公告请求失败重试一次后才标记失败",
+  html.includes("return once().catch") && html.includes("setTimeout(resolve, 800)") && html.includes(".catch(function () { return null; })"));
+ok("简报记录带公告口径版本与条数",
+  html.includes("ANN_CTX_VER") && html.includes("annVer: ANN_CTX_VER") && html.includes("annCount:"));
+ok("旧口径简报会重新生成/提示重新生成",
+  html.includes("ent[d.key].annVer === ANN_CTX_VER") && html.includes("staleAnn") && html.includes("公告口径已更新，请点「重新生成」"));
+ok("盘后 Prompt 要求写公告与风险（仅在有数据时）",
+  html.includes("④公告与风险（仅在有数据时写") && html.includes("四、公告与风险提示（仅在有数据时写"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
