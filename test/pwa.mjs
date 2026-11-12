@@ -2122,5 +2122,17 @@ ok("大盘/板块卡展示热点",
 ok("过滤涨停/昨日连板等伪热点",
   html.includes("themeNoise") && html.includes("昨日|涨停|跌停") && html.includes("hotConcepts = rows.filter"));
 
+/* ---------- 97) 一键同步公告名单（v1.08） ---------- */
+console.log("\n[公告名单同步]");
+ok("版本号升到 v1.08", html.includes('APP_VERSION = "v1.08') && html.includes("v1.08 · 2026-11-12"));
+ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
+ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
+ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
+ok("同步按钮已绑定事件", html.includes('$("btnWatchExport")') && html.includes('t.id === "btnWatchExport2"'));
+ok("公告任务先同步再采集", (() => {
+  const ps = fs.readFileSync(path.join(ROOT, "scripts", "run_scheduled_task.ps1"), "utf8");
+  return ps.includes("sync_pwa_watchlist.py") && ps.indexOf("sync_pwa_watchlist.py") < ps.indexOf("collect_announcements.py", ps.indexOf('"announcements"'));
+})());
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
