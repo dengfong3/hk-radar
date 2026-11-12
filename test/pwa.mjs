@@ -2124,7 +2124,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.10", html.includes('APP_VERSION = "v1.10') && html.includes("v1.10 · 2026-11-12"));
+ok("版本号升到 v1.11", html.includes('APP_VERSION = "v1.11') && html.includes("v1.11 · 2026-11-12"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2161,6 +2161,13 @@ ok("旧口径简报会重新生成/提示重新生成",
   html.includes("ent[d.key].annVer === ANN_CTX_VER") && html.includes("staleAnn") && html.includes("公告口径已更新，请点「重新生成」"));
 ok("盘后 Prompt 要求写公告与风险（仅在有数据时）",
   html.includes("④公告与风险（仅在有数据时写") && html.includes("四、公告与风险提示（仅在有数据时写"));
+
+/* ---------- 100) 东财公告 Referer 拦截（v1.11） ---------- */
+console.log("\n[公告跨域 Referer]");
+ok("公告请求关闭 Referer，避免东财 567 拦截",
+  html.includes('referrerPolicy: "no-referrer"') && html.includes('credentials: "omit"'));
+ok("代码注释说明 GitHub Pages Referer 会触发 567",
+  html.includes("GitHub Pages 的 Referer 返回 567 HTML") && html.includes("关闭 Referer 后浏览器可直接取到 JSON"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
