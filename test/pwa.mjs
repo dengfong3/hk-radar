@@ -1498,6 +1498,9 @@ await new Promise((r) => setTimeout(r, 300));
 const multiTxt = hMulti.deep("multiBox");
 ok("多股监控显示自选名称", multiTxt.indexOf("中际旭创") >= 0 && multiTxt.indexOf("腾讯控股") >= 0, multiTxt.slice(0, 200));
 ok("多股监控显示代码与涨跌占位", multiTxt.indexOf("300308") >= 0 && multiTxt.indexOf("--") >= 0, multiTxt.slice(0, 240));
+const tabTxt = hMulti.deep("monitorTabs");
+ok("前5插页显示名称/代码", tabTxt.indexOf("剑桥科技") >= 0 && tabTxt.indexOf("中际旭创") >= 0 &&
+  tabTxt.indexOf("603083") >= 0, tabTxt.slice(0, 240));
 
 
 /* ---------- 51b) 自选/多股监控支持 20 只 ---------- */
@@ -1523,6 +1526,10 @@ const multi20 = hWatch20.deep("multiBox");
 const all20 = codes20.every((c) => chips20.indexOf(C.displayCode(c)) >= 0 && multi20.indexOf(C.displayCode(c)) >= 0);
 ok("20只自选全部显示（chips + 多股监控）", all20, { chips: chips20.slice(0, 180), multi: multi20.slice(0, 260) });
 ok("自选计数显示 20/20", hWatch20.deep("watchCount").indexOf("20 / 20") >= 0, hWatch20.deep("watchCount"));
+const tab20 = hWatch20.deep("monitorTabs");
+const first5 = codes20.slice(0, 5).every((c) => tab20.indexOf(C.displayCode(c)) >= 0);
+const sixthAbsent = tab20.indexOf(C.displayCode(codes20[5])) < 0;
+ok("前5插页只收前5只", first5 && sixthAbsent, { tab: tab20.slice(0, 220), first5, sixthAbsent });
 let threwAdd20 = null;
 try {
   hWatch20.byId("codeInput").value = "sh600000";
@@ -2124,7 +2131,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.12", html.includes('APP_VERSION = "v1.12') && html.includes("v1.12 · 2026-11-12"));
+ok("版本号升到 v1.13", html.includes('APP_VERSION = "v1.13') && html.includes("v1.13 · 2026-11-14"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2168,6 +2175,16 @@ ok("公告请求关闭 Referer，避免东财 567 拦截",
   html.includes('referrerPolicy: "no-referrer"') && html.includes('credentials: "omit"'));
 ok("代码注释说明 GitHub Pages Referer 会触发 567",
   html.includes("GitHub Pages 的 Referer 返回 567 HTML") && html.includes("关闭 Referer 后浏览器可直接取到 JSON"));
+
+/* ---------- 101) 前5插页与轻量预警（v1.13） ---------- */
+console.log("\n[前5插页与轻量预警]");
+ok("页面含前5插页容器", html.includes('id="monitorTabs"') && html.includes("monitorTabs") && html.includes("renderMonitorTabs"));
+ok("前5插页只取自选前5只", html.includes("function monitorCodes()") && html.includes("st.watch || []).filter(Boolean).slice(0, 5)"));
+ok("前5轻量预警跳过当前股票/非A股", html.includes("function monitorTop5Alerts()") && html.includes("if (code === st.code) continue;") && html.includes('C.marketOf(code) !== "cn"'));
+ok("前5预警一次最多2条", html.includes("fired >= 2") && html.includes("multiTabState[code]"));
+ok("弹窗标题按信号股票显示", html.includes('var topCode = top.code || st.code') && html.includes('titleEl.setAttribute("data-code"'));
+ok("桌面通知按信号股票跳转", html.includes("sig.code = alertCode; sig.name = alertName;") && html.includes("var sigCode = sig.code || st.code"));
+ok("前5插页点击切换当前股票", html.includes("btn.addEventListener(\"click\", function () { switchTo(btn.getAttribute(\"data-code\")); })"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
