@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.14", html.includes('APP_VERSION = "v1.14') && html.includes("v1.14 · 2026-11-14"));
+ok("版本号升到 v1.15", html.includes('APP_VERSION = "v1.15') && html.includes("v1.15 · 2026-11-14"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2196,6 +2196,16 @@ ok("前5预警一次最多2条", html.includes("fired >= 2") && html.includes("m
 ok("弹窗标题按信号股票显示", html.includes('var topCode = top.code || st.code') && html.includes('titleEl.setAttribute("data-code"'));
 ok("桌面通知按信号股票跳转", html.includes("sig.code = alertCode; sig.name = alertName;") && html.includes("var sigCode = sig.code || st.code"));
 ok("前5插页点击切换当前股票", html.includes("btn.addEventListener(\"click\", function () { switchTo(btn.getAttribute(\"data-code\")); })"));
+
+/* ---------- 102) 5 插页单行不横向滚动（v1.15） ---------- */
+console.log("\n[5插页单行布局]");
+ok("插页容器使用5列网格，不再横向滚动",
+  html.includes("#monitorTabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))") &&
+  !html.includes("#monitorTabs{display:flex;gap:6px;overflow-x:auto"));
+ok("插页卡片可压缩不撑宽",
+  html.includes(".mtab{min-width:0;width:100%") && html.includes("box-sizing:border-box"));
+ok("窄屏下字号/间距自适应",
+  html.includes("@media (max-width:520px)") && html.includes(".mtab .mtn{font-size:10px}"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
