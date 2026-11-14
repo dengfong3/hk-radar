@@ -1530,6 +1530,16 @@ const tab20 = hWatch20.deep("monitorTabs");
 const first5 = codes20.slice(0, 5).every((c) => tab20.indexOf(C.displayCode(c)) >= 0);
 const sixthAbsent = tab20.indexOf(C.displayCode(codes20[5])) < 0;
 ok("前5插页只收前5只", first5 && sixthAbsent, { tab: tab20.slice(0, 220), first5, sixthAbsent });
+let threwPromote = null;
+try { hWatch20.byId("chips").children[6].listeners.click[0]({ target: { className: "" } }); } catch (e) { threwPromote = e; }
+await new Promise((r) => setTimeout(r, 80));
+const tabAfterPick = hWatch20.deep("monitorTabs");
+const promotedFirst = tabAfterPick.indexOf(C.displayCode(codes20[6])) >= 0;
+const droppedFifth = tabAfterPick.indexOf(C.displayCode(codes20[4])) < 0;
+ok("点选第7只后自动进入重点5只", !threwPromote && promotedFirst && droppedFifth,
+  { err: threwPromote && threwPromote.message, tab: tabAfterPick.slice(0, 240), promotedFirst, droppedFifth });
+ok("点选置顶顺序已持久化", JSON.stringify(hWatch20.saved().monitorTop || []).indexOf(codes20[6]) >= 0,
+  hWatch20.saved().monitorTop);
 let threwAdd20 = null;
 try {
   hWatch20.byId("codeInput").value = "sh600000";
@@ -2131,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.13", html.includes('APP_VERSION = "v1.13') && html.includes("v1.13 · 2026-11-14"));
+ok("版本号升到 v1.14", html.includes('APP_VERSION = "v1.14') && html.includes("v1.14 · 2026-11-14"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2179,7 +2189,8 @@ ok("代码注释说明 GitHub Pages Referer 会触发 567",
 /* ---------- 101) 前5插页与轻量预警（v1.13） ---------- */
 console.log("\n[前5插页与轻量预警]");
 ok("页面含前5插页容器", html.includes('id="monitorTabs"') && html.includes("monitorTabs") && html.includes("renderMonitorTabs"));
-ok("前5插页只取自选前5只", html.includes("function monitorCodes()") && html.includes("st.watch || []).filter(Boolean).slice(0, 5)"));
+ok("前5插页优先使用点选顺序", html.includes("function monitorCodes()") && html.includes("st.monitorTop") && html.includes("function promoteMonitorCode"));
+ok("点选前5之外的自选股会顶替第5只", html.includes("var next = [code].concat(cur).slice(0, 5)") && html.includes("save({ monitorTop: next })") && html.includes("promoteMonitorCode(code)"));
 ok("前5轻量预警跳过当前股票/非A股", html.includes("function monitorTop5Alerts()") && html.includes("if (code === st.code) continue;") && html.includes('C.marketOf(code) !== "cn"'));
 ok("前5预警一次最多2条", html.includes("fired >= 2") && html.includes("multiTabState[code]"));
 ok("弹窗标题按信号股票显示", html.includes('var topCode = top.code || st.code') && html.includes('titleEl.setAttribute("data-code"'));
