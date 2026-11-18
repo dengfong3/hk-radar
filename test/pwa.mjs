@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.15", html.includes('APP_VERSION = "v1.15') && html.includes("v1.15 · 2026-11-14"));
+ok("版本号升到 v1.16", html.includes('APP_VERSION = "v1.16') && html.includes("v1.16 · 2026-11-18"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2206,6 +2206,32 @@ ok("插页卡片可压缩不撑宽",
   html.includes(".mtab{min-width:0;width:100%") && html.includes("box-sizing:border-box"));
 ok("窄屏下字号/间距自适应",
   html.includes("@media (max-width:520px)") && html.includes(".mtab .mtn{font-size:10px}"));
+
+/* ---------- 103) ML 市场环境闸门 + 前向台账导出（v1.16） ---------- */
+console.log("\n[ML 环境闸门与台账导出]");
+ok("ML 环境闸门：弱环境不可用",
+  html.includes("function mlRegimeInfo()") && html.includes("out.usable = false") &&
+  html.includes('out.reason = "板块/大盘偏弱：ML 高分不加强看多，只作风险参考"'));
+ok("ML 环境信息进入 AI 上下文",
+  html.includes("regime: reg") && html.includes("usable: !!reg.usable") &&
+  html.includes("弱环境不得用高分加强看多"));
+ok("AI Prompt 含 ML 环境闸门硬规则",
+  html.includes("ML 环境闸门：输入 ml.regime") &&
+  html.includes("ml.regime.usable=false（弱环境）") &&
+  html.includes("禁止用 ML 高分支持买入或加强看多"));
+ok("信号卡显示市场环境与 ML 权重",
+  html.includes("市场环境：<b>") && html.includes("ML 权重：<b>") &&
+  html.includes("仅参考，不加强结论"));
+ok("ML 台账导出函数与按钮",
+  html.includes("function mlLogExport()") && html.includes('id="mlLogExport"') &&
+  html.includes('kind: "ml-forward-log"') && html.includes("entries: rows"));
+ok("ML 台账含已评估/待评估与分档统计",
+  html.includes("本地前向：已评估") && html.includes("待评估") &&
+  html.includes("stats: {") && html.includes("evaluated: stt.total"));
+ok("前向样本不足提示",
+  html.includes("样本不足 30，胜率/收益只作参考"));
+ok("ML 观察卡显示当前市场环境",
+  html.includes("当前市场环境：<b>") && html.includes("ML 使用：<b>"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
