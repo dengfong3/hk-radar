@@ -1778,7 +1778,7 @@ console.log("\n[AI 自动/实时二选一行为]");
 console.log("\n[卡片内手动 AI]");
 ok("仅在顶部「实时跟踪」右侧放「立即 AI 分析」", html.includes('id="aiGen"') && html.includes("立即 AI 分析") && !html.includes("aiquick"));
 ok("按钮顺序在实时跟踪之后", html.indexOf('id="aiRealtime"') < html.indexOf('id="aiGen"'));
-ok("点击调用一次 DeepSeek 刷新全部卡片", html.includes("generateAIBrief(true)") && html.includes("刷新全部卡片"));
+ok("点击调用一次 DeepSeek 分析（前5只模式走批量）", html.includes("generateAIBrief(true)") && html.includes("前5只一起"));
 
 
 /* ---------- 69) 定时深度简报（盘前/午间/盘后） ---------- */
@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.17", html.includes('APP_VERSION = "v1.17') && html.includes("v1.17 · 2026-11-23"));
+ok("版本号升到 v1.18", html.includes('APP_VERSION = "v1.18') && html.includes("v1.18 · 2026-11-23"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2242,6 +2242,32 @@ ok("前5异动覆盖急拉/急跌与均价", html.includes("15秒急拉") && htm
   html.includes("站上日内均价") && html.includes("跌破日内均价"));
 ok("前5异动状态徽章", html.includes('newhigh: "日内新高"') && html.includes('surge: "急拉"') && html.includes('vwapDown: "跌破均价"'));
 ok("前5异动仍限制一次最多2条", html.includes("fired >= 2") && html.includes("multiAlertSnap[code] = multiSnapOf(q)"));
+
+/* ---------- 105) 重点5只 AI 轻量跟踪（v1.18） ---------- */
+console.log("\n[重点5只 AI 跟踪]");
+ok("AI 卡含前5只一起开关且默认开启",
+  html.includes('id="aiTop5"') && html.includes("前5只一起") &&
+  html.includes("st.aiTop5 = st.aiTop5 !== false") && html.includes("save({ aiTop5: st.aiTop5 })"));
+ok("立即AI在前5只模式改走批量分析",
+  html.includes("if (top5AIMode() && monitorCodes().length >= 2) { generateTop5AIBrief(manual); return; }"));
+ok("批量上下文覆盖5只并带持仓/计划",
+  html.includes("function buildTop5AIContext") && html.includes("stocks: rows") &&
+  html.includes("position: position") && html.includes("plan: top5PlanOf(code)"));
+ok("批量 Prompt 要求每只输出 JSON 与条件",
+  html.includes("function top5AISystemPrompt") && html.includes("每只都要出现在 items") &&
+  html.includes("action\":\"buy|add|hold|watch|reduce|clear|wait") && html.includes("14:45 后不提示买入"));
+ok("一次请求覆盖5只并渲染跟踪卡",
+  html.includes("function callTop5AI") && html.includes('id="top5AICard"') &&
+  html.includes("function renderTop5AICard") && html.includes("一次请求覆盖"));
+ok("实时跟踪覆盖5只异动并触发批量分析",
+  html.includes("function top5RealtimeTrigger") && html.includes("创日内新高") &&
+  html.includes("接近止损") && html.includes("generateTop5AIBrief(false)"));
+ok("前5只行情/板块按需拉取并缓存",
+  html.includes("function ensureTop5Live") && html.includes("function fetchTop5SectorData") &&
+  html.includes("top5SectorCache") && html.includes("5 * 60 * 1000"));
+ok("AI 跟踪提示有冷却且不重复轰炸",
+  html.includes("function top5AIAlerts") && html.includes('"top5ai:" + it.rawCode') &&
+  html.includes("3 * 60 * 1000") && html.includes("fired < 2"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
