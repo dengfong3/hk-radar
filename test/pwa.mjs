@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.18", html.includes('APP_VERSION = "v1.18') && html.includes("v1.18 · 2026-11-23"));
+ok("版本号升到 v1.19", html.includes('APP_VERSION = "v1.19') && html.includes("v1.19 · 2026-11-23"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2268,6 +2268,26 @@ ok("前5只行情/板块按需拉取并缓存",
 ok("AI 跟踪提示有冷却且不重复轰炸",
   html.includes("function top5AIAlerts") && html.includes('"top5ai:" + it.rawCode') &&
   html.includes("3 * 60 * 1000") && html.includes("fired < 2"));
+
+/* ---------- 106) 前5只独立心跳与更灵敏异动（v1.19） ---------- */
+console.log("\n[前5只独立心跳]");
+ok("前5只有独立心跳，不再依赖当前股票请求链",
+  html.includes("function multiTick()") && html.includes("setInterval(function () { multiTick(); }, 5000)"));
+ok("前5只按A股时段判断，不用当前港股/美股时段",
+  html.includes("function cnTradingNow()") && html.includes('C.marketPhase(new Date(), "sh000001")') &&
+  html.includes("if (!cnTradingNow()) return;"));
+ok("多股请求有并发锁，避免叠请求",
+  html.includes("var multiBusy = false") && html.includes("if (multiBusy) return Promise.resolve(multiLive || {})") &&
+  html.includes("multiBusy = false; return x;"));
+ok("新高/新低条件放宽，不再要求贴着极值且涨跌≥1.2%",
+  html.includes("chg >= 0.8 && px >= high * 0.995") && html.includes("chg <= -0.8 && px <= low * 1.005"));
+ok("15秒急拉/急跌阈值降到0.6%",
+  html.includes("if (d >= 0.6)") && html.includes("if (d <= -0.6)"));
+ok("新增翻红/翻绿与均价穿越提醒",
+  html.includes('kind: "turnUp"') && html.includes('kind: "turnDown"') &&
+  html.includes("翻红站上昨收") && html.includes("翻绿跌破昨收"));
+ok("徽章覆盖翻红/翻绿",
+  html.includes('turnUp: "翻红"') && html.includes('turnDown: "翻绿"'));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
