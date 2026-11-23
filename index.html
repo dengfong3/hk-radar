@@ -7792,6 +7792,12 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
     var next = [code].concat(cur).slice(0, 5);
     st.monitorTop = next;
     save({ monitorTop: next });
+    // 重点栏变化后，旧的重点5只 AI 结论不再对应当前5只，清掉避免误导。
+    try {
+      st.aiTop5 = null; st.aiTop5At = 0; st.aiTop5Snap = null;
+      save({ aiTop5: null, aiTop5At: 0, aiTop5Snap: null });
+      renderTop5AICard();
+    } catch (e) {}
     renderMonitorTabs();
     return true;
   }
