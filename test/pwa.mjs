@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.16", html.includes('APP_VERSION = "v1.16') && html.includes("v1.16 · 2026-11-18"));
+ok("版本号升到 v1.17", html.includes('APP_VERSION = "v1.17') && html.includes("v1.17 · 2026-11-23"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2191,7 +2191,7 @@ console.log("\n[前5插页与轻量预警]");
 ok("页面含前5插页容器", html.includes('id="monitorTabs"') && html.includes("monitorTabs") && html.includes("renderMonitorTabs"));
 ok("前5插页优先使用点选顺序", html.includes("function monitorCodes()") && html.includes("st.monitorTop") && html.includes("function promoteMonitorCode"));
 ok("点选前5之外的自选股会顶替第5只", html.includes("var next = [code].concat(cur).slice(0, 5)") && html.includes("save({ monitorTop: next })") && html.includes("promoteMonitorCode(code)"));
-ok("前5轻量预警跳过当前股票/非A股", html.includes("function monitorTop5Alerts()") && html.includes("if (code === st.code) continue;") && html.includes('C.marketOf(code) !== "cn"'));
+ok("前5轻量预警跳过当前股票/非A股", html.includes("function monitorTop5Alerts()") && html.includes("if (code === st.code) { multiAlertSnap[code] = multiSnapOf(q); continue; }") && html.includes('C.marketOf(code) !== "cn"'));
 ok("前5预警一次最多2条", html.includes("fired >= 2") && html.includes("multiTabState[code]"));
 ok("弹窗标题按信号股票显示", html.includes('var topCode = top.code || st.code') && html.includes('titleEl.setAttribute("data-code"'));
 ok("桌面通知按信号股票跳转", html.includes("sig.code = alertCode; sig.name = alertName;") && html.includes("var sigCode = sig.code || st.code"));
@@ -2232,6 +2232,16 @@ ok("前向样本不足提示",
   html.includes("样本不足 30，胜率/收益只作参考"));
 ok("ML 观察卡显示当前市场环境",
   html.includes("当前市场环境：<b>") && html.includes("ML 使用：<b>"));
+
+/* ---------- 104) 前5异动提醒：不依赖持仓/计划（v1.17） ---------- */
+console.log("\n[前5异动提醒]");
+ok("前5异动保存上一轮快照", html.includes("multiAlertSnap") && html.includes("multiAlertDay") && html.includes("multiSnapOf(q)"));
+ok("前5异动规则不依赖持仓/计划", html.includes("function pickMultiGenericHit") && html.includes("if (!hit) hit = pickMultiGenericHit(q, prev);"));
+ok("前5异动覆盖日内新高/新低", html.includes("创日内新高") && html.includes("创日内新低"));
+ok("前5异动覆盖急拉/急跌与均价", html.includes("15秒急拉") && html.includes("15秒急跌") &&
+  html.includes("站上日内均价") && html.includes("跌破日内均价"));
+ok("前5异动状态徽章", html.includes('newhigh: "日内新高"') && html.includes('surge: "急拉"') && html.includes('vwapDown: "跌破均价"'));
+ok("前5异动仍限制一次最多2条", html.includes("fired >= 2") && html.includes("multiAlertSnap[code] = multiSnapOf(q)"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
