@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.21", html.includes('APP_VERSION = "v1.21') && html.includes("v1.21 · 2026-11-24"));
+ok("版本号升到 v1.21", html.includes('APP_VERSION = "v1.21.1') && html.includes("v1.21.1 · 2026-11-24"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2319,8 +2319,9 @@ ok("验证统计含扣费后开→收", vv && Math.abs((vv.netIntraPct ?? 0) - (
   vv && { intra: vv.avgIntraPct, net: vv.netIntraPct });
 ok("累计统计含扣费后开→收与样本不足提示",
   html.includes("all.netIntra") && html.includes("样本仅") && html.includes("开→收扣费后"));
-ok("版本与防透支说明更新到 v1.21",
-  html.includes("v1.21") && html.includes("同行业最多3只"));
+ok("版本与防透支说明更新到 v1.21.1",
+  html.includes("v1.21.1") && html.includes("同行业最多3只"));
+ok("样本不足提示不继承 60px 宽度", html.includes('class="sigwhy poolwarn"') && !html.includes('class="sigwhy ld"'));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
