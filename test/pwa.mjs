@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.20", html.includes('APP_VERSION = "v1.20') && html.includes("v1.20 · 2026-11-24"));
+ok("版本号升到 v1.21", html.includes('APP_VERSION = "v1.21') && html.includes("v1.21 · 2026-11-24"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2305,6 +2305,22 @@ ok("收盘/最高口径不再复制开盘",
 ok("增加“次日开盘买→收盘卖”独立口径",
   vv && Math.abs(vv.avgIntraPct + 3.9216) < 0.01 && vv.nIntra === 1 && vv.upIntra === 0,
   vv && { intra: vv.avgIntraPct, n: vv.nIntra });
+
+/* ---------- 108) 观察池 v1.21：行业约束、扣费口径、样本提示 ---------- */
+console.log("\n[观察池 v1.21]");
+ok("榜单解析保留成交额字段", html.includes("amount: x.f6") && html.includes("amount: num(it.amount)"));
+const sameInd = ["sh600011", "sh600012", "sh600013", "sh600014"].map((code) => ({
+  code, name: "同行业", price: 20, chgPct: 2, high: 20.2, low: 19, volRatio: 1.5,
+  turnover: 4, flowAmt: 1e8, flowPct: 8, amount: 9e8, industry: "测试行业",
+}));
+const capped = C.rankPoolCandidates({ up: sameInd }, { limit: 10, mix: false, maxIndustry: 3 });
+ok("同行业最多 3 只", capped.picks.length === 3, capped.picks.map((p) => p.code));
+ok("验证统计含扣费后开→收", vv && Math.abs((vv.netIntraPct ?? 0) - (-4.1716)) < 0.01,
+  vv && { intra: vv.avgIntraPct, net: vv.netIntraPct });
+ok("累计统计含扣费后开→收与样本不足提示",
+  html.includes("all.netIntra") && html.includes("样本仅") && html.includes("开→收扣费后"));
+ok("版本与防透支说明更新到 v1.21",
+  html.includes("v1.21") && html.includes("同行业最多3只"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
