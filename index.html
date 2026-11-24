@@ -1995,8 +1995,9 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
      * barsByCode: { code: bars[] }，bars 来自 parseTencentKline（date/o/h/l/c/v）。
      */
     function poolVerifyStats(records, barsByCode, poolDate) {
-      const out = { n: 0, up: 0, down: 0, flat: 0, upMax: 0, nMax: 0, upClose: 0, nClose: 0,
-        avgPct: null, avgClosePct: null, avgMaxPct: null, hitRate: null, hitRateClose: null, hitRateMax: null, rows: [], nextDate: "" };
+      const out = { n: 0, up: 0, down: 0, flat: 0, upMax: 0, nMax: 0, upClose: 0, nClose: 0, upIntra: 0, nIntra: 0,
+        avgPct: null, avgClosePct: null, avgMaxPct: null, avgIntraPct: null,
+        hitRate: null, hitRateClose: null, hitRateMax: null, hitRateIntra: null, rows: [], nextDate: "" };
       for (const r of records || []) {
         const bars = barsByCode && (barsByCode[r.code] || barsByCode[r.fullCode]);
         if (!bars || !bars.length) continue;
@@ -2025,6 +2026,13 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
         out.avgClosePct = cs.length ? cs.reduce((s, x) => s + x.closePct, 0) / cs.length : null;
         const ms = out.rows.filter((x) => x.maxPct != null);
         out.avgMaxPct = ms.length ? ms.reduce((s, x) => s + x.maxPct, 0) / ms.length : null;
+        // 次日开盘买入→次日收盘卖出：和“隔夜跳空”分开，避免把高开当成可交易利润
+        const intra = out.rows.filter((x) => x.openPct != null && x.closePct != null)
+          .map((x) => ((1 + x.closePct / 100) / (1 + x.openPct / 100) - 1) * 100);
+        out.nIntra = intra.length;
+        out.avgIntraPct = intra.length ? intra.reduce((s, x) => s + x, 0) / intra.length : null;
+        out.upIntra = intra.filter((x) => x > 0.05).length;
+        out.hitRateIntra = intra.length ? out.upIntra / intra.length * 100 : null;
         out.hitRate = out.up / out.n * 100;
         out.hitRateClose = out.nClose ? out.upClose / out.nClose * 100 : null;
         out.hitRateMax = out.nMax ? out.upMax / out.nMax * 100 : null;
@@ -2044,7 +2052,8 @@ canvas{display:block;width:100%;height:150px;background:var(--card2);border:1px 
             (v.avgPct >= 0 ? "+" : "") + v.avgPct.toFixed(2) + "%" +
             (v.avgClosePct != null ? " · 收盘均 " + (v.avgClosePct >= 0 ? "+" : "") + v.avgClosePct.toFixed(2) + "%" : "") +
             (v.avgMaxPct != null ? " · 最高均 " + (v.avgMaxPct >= 0 ? "+" : "") + v.avgMaxPct.toFixed(2) + "%" : "") +
-            (v.hitRateMax != null ? " · 最高上涨 " + v.upMax + "/" + v.nMax : "");
+            (v.hitRateMax != null ? " · 最高上涨 " + v.upMax + "/" + v.nMax : "") +
+            (v.avgIntraPct != null ? " · 开→收均 " + (v.avgIntraPct >= 0 ? "+" : "") + v.avgIntraPct.toFixed(2) + "%（" + v.upIntra + "/" + v.nIntra + " 涨）" : "");
           rec.per = (v.rows || []).slice(0, 6).map((r) => r.name + (r.chgPct >= 0 ? " +" : " ") + r.chgPct.toFixed(1) + "%").join(" · ");
         } else {
           rec.text = mmdd + " · " + rec.n + " 只 · 待次日验证";

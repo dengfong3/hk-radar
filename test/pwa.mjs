@@ -2302,6 +2302,9 @@ const vv = C.poolVerifyStats([{ code: "x", close: 10 }], { x: [{ date: "2026-10-
 ok("收盘/最高口径不再复制开盘",
   vv && Math.abs(vv.avgPct - 2) < 0.01 && Math.abs(vv.avgClosePct + 2) < 0.01 && Math.abs(vv.avgMaxPct - 5) < 0.01,
   vv && { open: vv.avgPct, close: vv.avgClosePct, max: vv.avgMaxPct });
+ok("增加“次日开盘买→收盘卖”独立口径",
+  vv && Math.abs(vv.avgIntraPct + 3.9216) < 0.01 && vv.nIntra === 1 && vv.upIntra === 0,
+  vv && { intra: vv.avgIntraPct, n: vv.nIntra });
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
