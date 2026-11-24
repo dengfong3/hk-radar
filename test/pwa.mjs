@@ -1704,11 +1704,11 @@ ok("悬浮菜单含生成/配置/回到AI卡", html.includes('id="fabGen"') && h
 ok("滚过 AI 卡才显示悬浮按钮", html.includes("getBoundingClientRect") && html.includes("aiFab"));
 
 
-/* ---------- 64) 复选框对齐 + 观察池只留近 3 天 ---------- */
+/* ---------- 64) 复选框对齐 + 观察池保留天数 ---------- */
 console.log("\n[排版与观察池保留]");
 ok("自动15分钟复选框不再套用输入框样式", html.includes('input:not([type="checkbox"])') && html.includes("accent-color"));
 ok("标签行内对齐", html.includes("display:inline-flex;align-items:center;gap:4px"));
-ok("观察池只保留近 3 天", html.includes("prunePools(3)") && html.includes("slice(-keep)") && html.includes("近 3 天"));
+ok("观察池保留近 30 天", html.includes("POOL_KEEP_DAYS = 30") && html.includes("prunePools(POOL_KEEP_DAYS)") && html.includes("slice(-keep)") && html.includes("近 30 天"));
 
 
 /* ---------- 65) AI 调用诊断 ---------- */
@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.19", html.includes('APP_VERSION = "v1.19') && html.includes("v1.19 · 2026-11-23"));
+ok("版本号升到 v1.20", html.includes('APP_VERSION = "v1.20') && html.includes("v1.20 · 2026-11-24"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2288,6 +2288,20 @@ ok("新增翻红/翻绿与均价穿越提醒",
   html.includes("翻红站上昨收") && html.includes("翻绿跌破昨收"));
 ok("徽章覆盖翻红/翻绿",
   html.includes('turnUp: "翻红"') && html.includes('turnDown: "翻绿"'));
+
+/* ---------- 107) 观察池审计修复（v1.20） ---------- */
+console.log("\n[观察池审计修复]");
+const stPick = C.rankPoolCandidates({ up: [{ code: "sz002360", name: "ST同德", price: 3.76, chgPct: 1.3, high: 3.8, low: 3.7, volRatio: 1.5, turnover: 4, flowAmt: 1e8, flowPct: 8 }] }, { limit: 5 });
+ok("ST/退市股不进入观察池", stPick.picks.length === 0, stPick.picks.map((p) => p.name));
+const nPick = C.rankPoolCandidates({ up: [{ code: "sh600001", name: "N新股", price: 20, chgPct: 2, high: 20.2, low: 19, volRatio: 1.5, turnover: 4, flowAmt: 1e8, flowPct: 8 }] }, { limit: 5 });
+ok("N/C 开头新股不进入观察池", nPick.picks.length === 0, nPick.picks.map((p) => p.name));
+ok("验证口径版本化，旧缓存会重算",
+  html.includes("POOL_VERIFY_VER = 2") && html.includes("p.verify.ver !== POOL_VERIFY_VER") &&
+  html.includes("ver: POOL_VERIFY_VER"));
+const vv = C.poolVerifyStats([{ code: "x", close: 10 }], { x: [{ date: "2026-10-24", o: 10.2, c: 9.8, h: 10.5 }] }, "2026-10-23");
+ok("收盘/最高口径不再复制开盘",
+  vv && Math.abs(vv.avgPct - 2) < 0.01 && Math.abs(vv.avgClosePct + 2) < 0.01 && Math.abs(vv.avgMaxPct - 5) < 0.01,
+  vv && { open: vv.avgPct, close: vv.avgClosePct, max: vv.avgMaxPct });
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
