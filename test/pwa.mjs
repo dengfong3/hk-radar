@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.21", html.includes('APP_VERSION = "v1.22') && html.includes("v1.22 · 2026-11-26"));
+ok("版本号升到 v1.21", html.includes('APP_VERSION = "v1.22.1') && html.includes("v1.22.1 · 2026-11-26"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2247,7 +2247,7 @@ ok("前5异动仍限制一次最多2条", html.includes("fired >= 2") && html.in
 console.log("\n[重点5只 AI 跟踪]");
 ok("AI 卡含前5只一起开关且默认开启",
   html.includes('id="aiTop5"') && html.includes("前5只一起") &&
-  html.includes("st.aiTop5 = st.aiTop5 !== false") && html.includes("save({ aiTop5: st.aiTop5 })"));
+  html.includes("var _top5On = st.aiTop5 !== false") && html.includes("save({ aiTop5: st.aiTop5 })"));
 ok("立即AI在前5只模式改走批量分析（当前股在重点5只内）",
   html.includes("if (!forceSingle && top5AIMode() && monitorCodes().length >= 2 && (_inTop5 || !manual))") &&
   html.includes("generateTop5AIBrief(manual)"));
@@ -2335,7 +2335,9 @@ ok("手动分析当前不在重点5只时不会强制走批量",
   html.includes("_inTop5"));
 ok("前5只 AI 完成后刷新实时简报",
   html.includes("renderTop5AICard();") && html.includes("renderAnalysisCard(true);"));
-ok("版本升到 v1.22", html.includes('APP_VERSION = "v1.22') && html.includes("v1.22 · 2026-11-26"));
+ok("刷新时保留前5只 AI 结果对象",
+  html.includes("_top5HasResult") && html.includes("else if (!_top5HasResult) st.aiTop5 = true;"));
+ok("版本升到 v1.22.1", html.includes('APP_VERSION = "v1.22.1') && html.includes("v1.22.1 · 2026-11-26"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
