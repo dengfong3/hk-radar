@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.21", html.includes('APP_VERSION = "v1.21.1') && html.includes("v1.21.1 · 2026-11-24"));
+ok("版本号升到 v1.21", html.includes('APP_VERSION = "v1.22') && html.includes("v1.22 · 2026-11-26"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2248,8 +2248,9 @@ console.log("\n[重点5只 AI 跟踪]");
 ok("AI 卡含前5只一起开关且默认开启",
   html.includes('id="aiTop5"') && html.includes("前5只一起") &&
   html.includes("st.aiTop5 = st.aiTop5 !== false") && html.includes("save({ aiTop5: st.aiTop5 })"));
-ok("立即AI在前5只模式改走批量分析",
-  html.includes("if (top5AIMode() && monitorCodes().length >= 2) { generateTop5AIBrief(manual); return; }"));
+ok("立即AI在前5只模式改走批量分析（当前股在重点5只内）",
+  html.includes("if (!forceSingle && top5AIMode() && monitorCodes().length >= 2 && (_inTop5 || !manual))") &&
+  html.includes("generateTop5AIBrief(manual)"));
 ok("批量上下文覆盖5只并带持仓/计划",
   html.includes("function buildTop5AIContext") && html.includes("stocks: rows") &&
   html.includes("position: position") && html.includes("plan: top5PlanOf(code)"));
@@ -2319,9 +2320,22 @@ ok("验证统计含扣费后开→收", vv && Math.abs((vv.netIntraPct ?? 0) - (
   vv && { intra: vv.avgIntraPct, net: vv.netIntraPct });
 ok("累计统计含扣费后开→收与样本不足提示",
   html.includes("all.netIntra") && html.includes("样本仅") && html.includes("开→收扣费后"));
-ok("版本与防透支说明更新到 v1.21.1",
-  html.includes("v1.21.1") && html.includes("同行业最多3只"));
+ok("版本与防透支说明更新到 v1.22",
+  html.includes("v1.22") && html.includes("同行业最多3只"));
 ok("样本不足提示不继承 60px 宽度", html.includes('class="sigwhy poolwarn"') && !html.includes('class="sigwhy ld"'));
+
+/* ---------- 109) 实时分析简报：前5只 AI 回填与单只分析（v1.22） ---------- */
+console.log("\n[实时分析简报 v1.22]");
+ok("前5只 AI 结果可回填当前股简报",
+  html.includes("function aiTop5ItemFor") && html.includes("function aiTop5BriefFor") && html.includes("useTop5"));
+ok("当前股不在重点5只时可单只分析",
+  html.includes('id="anaSingle"') && html.includes("generateAIBrief(true, true)"));
+ok("手动分析当前不在重点5只时不会强制走批量",
+  html.includes("!forceSingle && top5AIMode() && monitorCodes().length >= 2 && (_inTop5 || !manual)") &&
+  html.includes("_inTop5"));
+ok("前5只 AI 完成后刷新实时简报",
+  html.includes("renderTop5AICard();") && html.includes("renderAnalysisCard(true);"));
+ok("版本升到 v1.22", html.includes('APP_VERSION = "v1.22') && html.includes("v1.22 · 2026-11-26"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
