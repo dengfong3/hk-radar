@@ -2141,7 +2141,7 @@ ok("过滤涨停/昨日连板等伪热点",
 
 /* ---------- 97) 一键同步公告名单（v1.08 起） ---------- */
 console.log("\n[公告名单同步]");
-ok("版本号升到 v1.21", html.includes('APP_VERSION = "v1.22.1') && html.includes("v1.22.1 · 2026-11-26"));
+ok("版本号升到 v1.23", html.includes('APP_VERSION = "v1.23') && html.includes("v1.23 · 2026-11-28"));
 ok("自选卡含同步公告按钮", html.includes('id="btnWatchExport"') && html.includes("同步公告"));
 ok("本机卡含动态同步公告按钮", html.includes('id="btnWatchExport2"') && html.includes("exportWatchlistForCollector"));
 ok("导出的 JSON 含 codes/names/kind", html.includes('kind: "watchlist"') && html.includes("codes: codes") && html.includes("names: names"));
@@ -2320,8 +2320,8 @@ ok("验证统计含扣费后开→收", vv && Math.abs((vv.netIntraPct ?? 0) - (
   vv && { intra: vv.avgIntraPct, net: vv.netIntraPct });
 ok("累计统计含扣费后开→收与样本不足提示",
   html.includes("all.netIntra") && html.includes("样本仅") && html.includes("开→收扣费后"));
-ok("版本与防透支说明更新到 v1.22",
-  html.includes("v1.22") && html.includes("同行业最多3只"));
+ok("版本与防透支说明更新到 v1.23",
+  html.includes("v1.23") && html.includes("同行业最多3只"));
 ok("样本不足提示不继承 60px 宽度", html.includes('class="sigwhy poolwarn"') && !html.includes('class="sigwhy ld"'));
 
 /* ---------- 109) 实时分析简报：前5只 AI 回填与单只分析（v1.22） ---------- */
@@ -2337,7 +2337,16 @@ ok("前5只 AI 完成后刷新实时简报",
   html.includes("renderTop5AICard();") && html.includes("renderAnalysisCard(true);"));
 ok("刷新时保留前5只 AI 结果对象",
   html.includes("_top5HasResult") && html.includes("else if (!_top5HasResult) st.aiTop5 = true;"));
-ok("版本升到 v1.22.1", html.includes('APP_VERSION = "v1.22.1') && html.includes("v1.22.1 · 2026-11-26"));
+ok("版本升到 v1.23", html.includes('APP_VERSION = "v1.23') && html.includes("v1.23 · 2026-11-28"));
+
+/* ---------- 110) 智能弹窗复核闸门（v1.23） ---------- */
+console.log("\n[智能弹窗复核 v1.23]");
+ok("弹窗先过智能闸门", html.includes("function smartAlertGate") && html.includes("function fire(sig") && html.includes("fireNow(sig"));
+ok("AI复核提示", html.includes("ALERT_REVIEW_SYSTEM") && html.includes("function aiAlertReview") && html.includes("AI复核"));
+ok("本地环境闸门", html.includes("function alertLocalReview") && html.includes("板块强、价仍在均价上方，不机械卖"));
+ok("前5只信息类只更新插页", html.includes('if (hit.level === "info")') && html.includes("changed = true;"));
+ok("复核日志与频控", html.includes("alertReviews") && html.includes("90 * 1000") && html.includes("count >= 3"));
+ok("版本升到 v1.23", html.includes('APP_VERSION = "v1.23') && html.includes("v1.23 · 2026-11-28"));
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
